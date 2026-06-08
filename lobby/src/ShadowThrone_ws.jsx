@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
- 
+import GameBoard from "./ShadowThrone_GameBoard";
+
 // ─── CONFIG: Dynamic WebSocket URL ───────────────────────────────────────────
 // Priority: 1) ?server= query param  2) localStorage  3) same-host /ws
 function getWsUrl() {
@@ -14,40 +15,48 @@ function getWsUrl() {
       const url = serverParam.startsWith("ws") ? serverParam
         : `${proto}//${serverParam}`;
       // บันทึกลง localStorage ด้วยเพื่อไม่ต้องส่ง query ซ้ำ
-      try { localStorage.setItem("sot_ws_url", url); } catch {}
+      try { localStorage.setItem("sot_ws_url", url); } catch { }
       return url;
     }
-  } catch {}
+  } catch { }
   try {
     const saved = localStorage.getItem("sot_ws_url");
     if (saved && saved.startsWith("ws")) return saved;
-  } catch {}
+  } catch { }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return "wss://sot-server-0te4.onrender.com";
 }
 const WS_URL = getWsUrl();
- 
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const ROLES = {
-  king:     { id: "king",     ico: "👑", name: "พระราชา",  color: "#c9a84c",
-              why: "รักษาบัลลังก์และปกป้องอาณาจักร", win: "ครองราชย์ครบ 8 เฟส หรือปราบกบฏ" },
-  rebel:    { id: "rebel",    ico: "⚔️", name: "กบฏ",      color: "#c94040",
-              why: "โค่นบัลลังก์ด้วยการรวมกำลัง",    win: "ราชา HP=0 หรือยึดศาลบัลลังก์" },
-  traitor:  { id: "traitor",  ico: "🗡️", name: "คนทรยศ",  color: "#8c4cc9",
-              why: "ซ่อนตัวเป็นพันธมิตร สะสมสมบัติลับ", win: "สมบัติ 5 ชิ้น หรือรอดคนสุดท้าย" },
-  commoner: { id: "commoner", ico: "🧑‍🌾", name: "ราษฎร", color: "#4cc94c",
-              why: "ไม่อยู่ฝ่ายใด สะสมทรัพย์สิน",    win: "ทอง 10 เหรียญ หรือ Lv.5" },
+  king: {
+    id: "king", ico: "👑", name: "พระราชา", color: "#c9a84c",
+    why: "รักษาบัลลังก์และปกป้องอาณาจักร", win: "ครองราชย์ครบ 8 เฟส หรือปราบกบฏ"
+  },
+  rebel: {
+    id: "rebel", ico: "⚔️", name: "กบฏ", color: "#c94040",
+    why: "โค่นบัลลังก์ด้วยการรวมกำลัง", win: "ราชา HP=0 หรือยึดศาลบัลลังก์"
+  },
+  traitor: {
+    id: "traitor", ico: "🗡️", name: "คนทรยศ", color: "#8c4cc9",
+    why: "ซ่อนตัวเป็นพันธมิตร สะสมสมบัติลับ", win: "สมบัติ 5 ชิ้น หรือรอดคนสุดท้าย"
+  },
+  commoner: {
+    id: "commoner", ico: "🧑‍🌾", name: "ราษฎร", color: "#4cc94c",
+    why: "ไม่อยู่ฝ่ายใด สะสมทรัพย์สิน", win: "ทอง 10 เหรียญ หรือ Lv.5"
+  },
 };
- 
+
 const CLASSES = {
-  warrior: { id:"warrior", ico:"⚔️",  name:"นักรบ",    evo:"→ คนเถื่อน → เบอร์เซิกเกอร์", hp:12, mana:4,  move:3, s:{STR:5,DEX:2,VIT:4,INT:1}, ability:"โจมตีกว้าง 3 เป้าหมาย",    passive:"ทนดาเมจสุดท้าย 1 ครั้ง" },
-  knight:  { id:"knight",  ico:"🛡️",  name:"อัศวิน",   evo:"→ พาราดิน → โรยัลไนท์",        hp:14, mana:5,  move:2, s:{STR:4,DEX:2,VIT:5,INT:2}, ability:"พระบัญชา: สั่งย้ายผู้เล่น", passive:"ลดดาเมจรับ 1 ตลอดเวลา" },
-  mage:    { id:"mage",    ico:"🔮",  name:"นักเวทย์", evo:"→ จอมเวทย์ → นักปราญ์",         hp:7,  mana:14, move:2, s:{STR:1,DEX:3,VIT:2,INT:7}, ability:"เวทย์พื้นที่ 3 ช่อง",       passive:"จั่วเวทย์เพิ่ม 1 ใบ/เฟส" },
-  archer:  { id:"archer",  ico:"🏹",  name:"นักธนู",   evo:"→ พลซุ่มยิง → นักล่า",          hp:9,  mana:6,  move:4, s:{STR:2,DEX:6,VIT:3,INT:2}, ability:"ยิงข้ามกำแพง ระยะ 4",      passive:"ตีคริต 15% เสมอ" },
-  rogue:   { id:"rogue",   ico:"🗡️",  name:"โจร",      evo:"→ นักฆ่า → จอมอุบาย",           hp:9,  mana:7,  move:5, s:{STR:3,DEX:6,VIT:3,INT:2}, ability:"โจมตีด้านหลัง ATK×2",     passive:"หลบ 20% เสมอ" },
-  cleric:  { id:"cleric",  ico:"✨",  name:"นักบวช",   evo:"→ บาทหลวง → บิชอป",             hp:10, mana:10, move:2, s:{STR:1,DEX:2,VIT:4,INT:6}, ability:"ฟื้น HP +4 ให้พันธมิตร",   passive:"ฟื้น HP +1 ทุกต้นเทิร์น" },
+  warrior: { id: "warrior", ico: "⚔️", name: "นักรบ", evo: "→ คนเถื่อน → เบอร์เซิกเกอร์", hp: 12, mana: 4, move: 3, s: { STR: 5, DEX: 2, VIT: 4, INT: 1 }, ability: "โจมตีกว้าง 3 เป้าหมาย", passive: "ทนดาเมจสุดท้าย 1 ครั้ง" },
+  knight: { id: "knight", ico: "🛡️", name: "อัศวิน", evo: "→ พาราดิน → โรยัลไนท์", hp: 14, mana: 5, move: 2, s: { STR: 4, DEX: 2, VIT: 5, INT: 2 }, ability: "พระบัญชา: สั่งย้ายผู้เล่น", passive: "ลดดาเมจรับ 1 ตลอดเวลา" },
+  mage: { id: "mage", ico: "🔮", name: "นักเวทย์", evo: "→ จอมเวทย์ → นักปราญ์", hp: 7, mana: 14, move: 2, s: { STR: 1, DEX: 3, VIT: 2, INT: 7 }, ability: "เวทย์พื้นที่ 3 ช่อง", passive: "จั่วเวทย์เพิ่ม 1 ใบ/เฟส" },
+  archer: { id: "archer", ico: "🏹", name: "นักธนู", evo: "→ พลซุ่มยิง → นักล่า", hp: 9, mana: 6, move: 4, s: { STR: 2, DEX: 6, VIT: 3, INT: 2 }, ability: "ยิงข้ามกำแพง ระยะ 4", passive: "ตีคริต 15% เสมอ" },
+  rogue: { id: "rogue", ico: "🗡️", name: "โจร", evo: "→ นักฆ่า → จอมอุบาย", hp: 9, mana: 7, move: 5, s: { STR: 3, DEX: 6, VIT: 3, INT: 2 }, ability: "โจมตีด้านหลัง ATK×2", passive: "หลบ 20% เสมอ" },
+  cleric: { id: "cleric", ico: "✨", name: "นักบวช", evo: "→ บาทหลวง → บิชอป", hp: 10, mana: 10, move: 2, s: { STR: 1, DEX: 2, VIT: 4, INT: 6 }, ability: "ฟื้น HP +4 ให้พันธมิตร", passive: "ฟื้น HP +1 ทุกต้นเทิร์น" },
 };
- 
+
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 const css = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Sarabun:wght@300;400;600;700&display=swap');
@@ -265,96 +274,96 @@ input::placeholder{color:var(--txt-d)}
 .nm-cancel{background:rgba(255,255,255,.05);color:var(--txt-m);border:1px solid rgba(255,255,255,.1);border-radius:10px;cursor:pointer;font-family:'Sarabun',sans-serif;font-size:13px;padding:11px;flex:1;transition:all .15s}
 .nm-cancel:hover{background:rgba(255,255,255,.1)}
 `;
- 
- 
+
+
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ShadowThrone() {
   // ── Screen state ──────────────────────────────────────────────────────────
   const [screen, setScreen] = useState("title");
   const [tab, setTab] = useState("browse");
- 
+
   // ── WebSocket ─────────────────────────────────────────────────────────────
   const wsRef = useRef(null);
   const [wsStatus, setWsStatus] = useState("connecting");
- 
+
   // ── Identity ──────────────────────────────────────────────────────────────
   const [myName, setMyName] = useState("");
   const [myClass, setMyClass] = useState("");
   const myNameRef = useRef(""); // stable ref to avoid stale closure bugs
- 
+
   // ── Room state ────────────────────────────────────────────────────────────
   const [room, _setRoom] = useState(null);
   const roomRef = useRef(null);
   const setRoom = (r) => { roomRef.current = r; _setRoom(r); };
- 
+
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
- 
+
   // ── Create form ───────────────────────────────────────────────────────────
   const [newName, setNewName] = useState("");
   const [newCount, setNewCount] = useState(4);
   const [newMode, setNewMode] = useState("standard");
   const [newVis, setNewVis] = useState("public"); // "public" | "private"
- 
+
   // ── Join form ─────────────────────────────────────────────────────────────
   const [joinCode, setJoinCode] = useState("");
   const [joinName, setJoinName] = useState("");
- 
+
   // ── Browse-room inline name modal ─────────────────────────────────────────
   const [joinModal, setJoinModal] = useState(null); // { code, hostName } | null
   const [joinModalName, setJoinModalName] = useState("");
- 
+
   // ── Role reveal ───────────────────────────────────────────────────────────
   const [flipped, setFlipped] = useState(false);
   const [myRole, setMyRole] = useState(null);
   const [roleConfirmed, setRoleConfirmed] = useState(false); // I confirmed
   const [allRolesReady, setAllRolesReady] = useState(false); // everyone confirmed
- 
+
   // ── Server Config (สำหรับ Cloudflare Tunnel) ─────────────────────────────
   const [serverUrlInput, setServerUrlInput] = useState(
     (() => { try { return localStorage.getItem("sot_ws_url") || ""; } catch { return ""; } })()
   );
   const [showServerConfig, setShowServerConfig] = useState(false);
- 
+
   // ── Toast ─────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState({ msg: "", show: false });
   const showToast = useCallback((msg) => {
     setToast({ msg, show: true });
     setTimeout(() => setToast(t => ({ ...t, show: false })), 2600);
   }, []);
- 
+
   // ── WebSocket connection with auto-reconnect ───────────────────────────────
   const wsSend = useCallback((data) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(data));
   }, []);
- 
+
   useEffect(() => {
     let alive = true;
     let ws;
     let reconnectTimer;
- 
+
     function connect() {
       if (!alive) return;
       setWsStatus("connecting");
       ws = new WebSocket(WS_URL);
       wsRef.current = ws;
- 
+
       ws.onopen = () => {
         if (!alive) return;
         setWsStatus("ok");
         // Re-request room list if on join screen
         if (screen === "join") wsSend({ type: "list_rooms" });
       };
- 
+
       ws.onmessage = (e) => {
         if (!alive) return;
         let msg;
         try { msg = JSON.parse(e.data); } catch { return; }
- 
+
         switch (msg.type) {
- 
+
           // ── Server assigned us a slot ──────────────────────────────────
           case "joined":
             setRoom(msg.room);
@@ -365,11 +374,11 @@ export default function ShadowThrone() {
               : "✅ เข้าห้องสำเร็จ!"
             );
             break;
- 
+
           // ── Lobby / room state changed ─────────────────────────────────
           case "room_update": {
             setRoom(msg.room);
- 
+
             // If game just started → go to role reveal
             if (msg.room.status === "started" && screen !== "roles" && screen !== "gameboard") {
               // Find MY role index
@@ -386,39 +395,39 @@ export default function ShadowThrone() {
             }
             break;
           }
- 
+
           // ── Room list for browse tab ───────────────────────────────────
           case "room_list":
             setRooms(msg.rooms || []);
             break;
- 
+
           // ── All players confirmed their role → open game board ─────────
           case "all_roles_ready":
             setAllRolesReady(true);
             // Automatically transition (no button needed)
             setScreen("gameboard");
             break;
- 
+
           case "kicked":
             showToast("คุณถูกเตะออกจากห้อง");
             setRoom(null); setMyClass(""); setMyRole(null); setScreen("title");
             break;
- 
+
           case "room_closed":
             showToast("⚠ " + (msg.reason === "host_left" ? "Host ออกจากห้องแล้ว" : "ห้องถูกปิด"));
             setRoom(null); setMyClass(""); setMyRole(null); setScreen("title");
             break;
- 
+
           case "error":
             showToast("❌ " + msg.msg);
             setLoading(false);
             break;
- 
+
           default:
             break;
         }
       };
- 
+
       ws.onclose = () => {
         if (!alive) return;
         setWsStatus("error");
@@ -426,7 +435,7 @@ export default function ShadowThrone() {
       };
       ws.onerror = () => { if (alive) setWsStatus("error"); };
     }
- 
+
     connect();
     return () => {
       alive = false;
@@ -435,7 +444,7 @@ export default function ShadowThrone() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showToast]);
- 
+
   // ── Browse: auto-refresh when on join tab ─────────────────────────────────
   const browseRooms = useCallback(() => wsSend({ type: "list_rooms" }), [wsSend]);
   useEffect(() => {
@@ -444,7 +453,7 @@ export default function ShadowThrone() {
     const t = setInterval(browseRooms, 4000);
     return () => clearInterval(t);
   }, [screen, browseRooms]);
- 
+
   // ── Save Server URL ───────────────────────────────────────────────────────
   const saveServerUrl = () => {
     try {
@@ -455,16 +464,16 @@ export default function ShadowThrone() {
         localStorage.removeItem("sot_ws_url");
       }
       window.location.reload();
-    } catch {}
+    } catch { }
   };
- 
+
   // ─── ACTIONS ──────────────────────────────────────────────────────────────
   const saveName = (name) => {
     const n = name.trim();
     setMyName(n);
     myNameRef.current = n;
   };
- 
+
   const createRoom = () => {
     const name = newName.trim() || "ผู้เล่น 1";
     saveName(name);
@@ -474,7 +483,7 @@ export default function ShadowThrone() {
     // NOTE: code is generated SERVER-SIDE now — do NOT send a code
     wsSend({ type: "create_room", playerName: name, maxPlayers: newCount, mode: newMode, visibility: newVis });
   };
- 
+
   const joinRoom = (codeArg, nameArg) => {
     const code = (codeArg || joinCode).trim().toUpperCase();
     const name = (nameArg || joinName).trim() || "ผู้เล่น";
@@ -485,20 +494,20 @@ export default function ShadowThrone() {
     setMyClass("");
     wsSend({ type: "join_room", code, playerName: name });
   };
- 
+
   const pickClass = (clsId) => {
     setMyClass(clsId);
     wsSend({ type: "pick_class", classId: clsId });
   };
- 
+
   const toggleReady = () => {
     if (!myClass) { showToast("เลือกอาชีพก่อน"); return; }
     wsSend({ type: "toggle_ready" });
   };
- 
+
   const startGame = () => wsSend({ type: "start_game" });
   const kickPlayer = (idx) => wsSend({ type: "kick_player", playerIdx: idx });
- 
+
   // FIX: proper leave — notify server first so it can clean up
   const leaveRoom = () => {
     wsSend({ type: "leave_room" });
@@ -509,7 +518,7 @@ export default function ShadowThrone() {
     setAllRolesReady(false);
     setScreen("title");
   };
- 
+
   // ── Role reveal confirm ────────────────────────────────────────────────────
   // FIX: each player confirms independently; server tracks progress
   const confirmRole = () => {
@@ -518,27 +527,27 @@ export default function ShadowThrone() {
       wsSend({ type: "role_confirmed", playerName: myNameRef.current });
     }
   };
- 
+
   // ── Derived values ────────────────────────────────────────────────────────
   const players = room?.players || [];
   const myIdx = players.findIndex(p => p.name === myName);
   const isHost = myIdx === 0;
   const readyCount = players.filter(p => p.ready || p.host).length;
   const rolesReadyList = room?.rolesReady || [];
- 
+
   const roleDef = myRole ? ROLES[myRole] : null;
- 
+
   // ── WS status badge ───────────────────────────────────────────────────────
   const wsBadge =
-    wsStatus === "ok"         ? <span className="ws-badge ws-ok">● เชื่อมต่อแล้ว</span>
-    : wsStatus === "connecting" ? <span className="ws-badge ws-connecting">○ กำลังเชื่อมต่อ...</span>
-    :                             <span className="ws-badge ws-err">✕ ไม่ได้เชื่อมต่อ — รีสตาร์ท server?</span>;
- 
+    wsStatus === "ok" ? <span className="ws-badge ws-ok">● เชื่อมต่อแล้ว</span>
+      : wsStatus === "connecting" ? <span className="ws-badge ws-connecting">○ กำลังเชื่อมต่อ...</span>
+        : <span className="ws-badge ws-err">✕ ไม่ได้เชื่อมต่อ — รีสตาร์ท server?</span>;
+
   // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
     <>
       <style>{css}</style>
- 
+
       {/* LOADING */}
       {loading && (
         <div className="loading-overlay">
@@ -546,10 +555,10 @@ export default function ShadowThrone() {
           <div className="loading-txt">{loadMsg}</div>
         </div>
       )}
- 
+
       {/* TOAST */}
       <div className={`toast${toast.show ? "" : " hide"}`}>{toast.msg}</div>
- 
+
       {/* ── JOIN NAME MODAL (browse tab) ──────────────────────────── */}
       {joinModal && (
         <div className="name-modal-backdrop" onClick={() => setJoinModal(null)}>
@@ -599,7 +608,7 @@ export default function ShadowThrone() {
           </div>
         </div>
       )}
- 
+
       {/* ═══════════════════ TITLE ═══════════════════ */}
       <div id="t" className={`screen${screen === "title" ? " on" : ""}`}>
         <div className="stars" />
@@ -612,7 +621,7 @@ export default function ShadowThrone() {
           <div style={{ marginBottom: "16px" }}>
             {wsBadge}
             <div style={{ marginTop: "8px" }}>
-                {/* <button
+              {/* <button
                   className="b-sm"
                   onClick={() => setShowServerConfig(v => !v)}
                   style={{ fontSize: "10px" }}
@@ -690,7 +699,7 @@ export default function ShadowThrone() {
                       onClick={() => {
                         const serverHost = WS_URL.replace(/^wss?:\/\//, "").replace(/\/ws\/?$/, "");
                         const shareUrl = `${window.location.origin}${window.location.pathname}?server=${encodeURIComponent(serverHost)}`;
-                        navigator.clipboard?.writeText(shareUrl).catch(() => {});
+                        navigator.clipboard?.writeText(shareUrl).catch(() => { });
                         setShowServerConfig(false);
                       }}>
                       📋 คัดลอกลิงก์
@@ -714,7 +723,7 @@ export default function ShadowThrone() {
           </div>
         </div>
       </div>
- 
+
       {/* ═══════════════ CREATE ROOM ═══════════════ */}
       <div id="cr" className={`screen${screen === "create" ? " on" : ""}`}>
         <div style={{ maxWidth: "440px", width: "100%", padding: "20px" }}>
@@ -722,10 +731,10 @@ export default function ShadowThrone() {
             <button className="b-sm" onClick={() => setScreen("title")}>← กลับ</button>
             <h2 className="cinzel" style={{ fontSize: "18px", color: "var(--gold)" }}>🏰 สร้างห้องใหม่</h2>
           </div>
- 
+
           <div className="sbox">
             <div className="sh">⚙ ตั้งค่าห้อง</div>
- 
+
             <div className="row">
               <label>ชื่อของคุณ:</label>
               <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อ Host" maxLength={12} />
@@ -747,7 +756,7 @@ export default function ShadowThrone() {
                 <option value="epic">มหากาพย์ (8 เฟส)</option>
               </select>
             </div>
- 
+
             {/* ✨ NEW: visibility toggle */}
             <div style={{ marginBottom: "8px" }}>
               <div style={{ fontSize: "12px", color: "var(--txt-m)", marginBottom: "6px" }}>ประเภทห้อง:</div>
@@ -764,12 +773,12 @@ export default function ShadowThrone() {
                 </div>
               </div>
             </div>
- 
+
             <div style={{ fontSize: "10px", color: "var(--txt-m)", background: "rgba(201,168,76,.05)", padding: "8px 10px", borderRadius: "6px", border: "1px solid rgba(201,168,76,.15)" }}>
               🎲 รหัสห้องจะถูกสร้างโดยอัตโนมัติ — แชร์ให้เพื่อนเพื่อเข้าร่วม
             </div>
           </div>
- 
+
           <div style={{ textAlign: "center", marginTop: "8px" }}>
             <button className="btn b-gold" onClick={createRoom} disabled={!newName.trim() || wsStatus !== "ok"}>
               🏰 สร้างห้องเลย
@@ -777,7 +786,7 @@ export default function ShadowThrone() {
           </div>
         </div>
       </div>
- 
+
       {/* ═══════════════ JOIN / BROWSE ═══════════════ */}
       <div id="rl" className={`screen${screen === "join" ? " on" : ""}`}>
         <div className="rlwrap">
@@ -785,7 +794,7 @@ export default function ShadowThrone() {
             <button className="b-sm" onClick={() => setScreen("title")}>← กลับ</button>
             <h2 className="cinzel" style={{ fontSize: "18px", color: "var(--gold)" }}>⚔️ เข้าร่วมเกม</h2>
           </div>
- 
+
           <div className="tabs">
             <div className={`tab${tab === "browse" ? " on" : ""}`} onClick={() => { setTab("browse"); browseRooms(); }}>
               🔍 ห้องสาธารณะ
@@ -794,14 +803,14 @@ export default function ShadowThrone() {
               🔒 ใส่รหัสห้อง
             </div>
           </div>
- 
+
           {tab === "browse" && (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                 <div style={{ fontSize: "12px", color: "var(--txt-m)" }}>ห้องสาธารณะที่กำลังรอผู้เล่น</div>
                 <button className="b-sm" onClick={browseRooms}>🔄 รีเฟรช</button>
               </div>
- 
+
               {rooms.length === 0 ? (
                 <div className="empty-rooms">
                   <div style={{ fontSize: "48px", marginBottom: "12px" }}>🏰</div>
@@ -833,11 +842,11 @@ export default function ShadowThrone() {
               )}
             </>
           )}
- 
+
           {tab === "manual" && (
             <div className="join-box">
               <div className="join-title">🔒 กรอกรหัสห้อง</div>
- 
+
               {/* Room code input */}
               <div style={{ marginBottom: "4px", textAlign: "left", fontSize: "10px", color: "var(--txt-m)", letterSpacing: ".06em" }}>รหัสห้อง</div>
               <input
@@ -848,7 +857,7 @@ export default function ShadowThrone() {
                 maxLength={8}
                 style={{ marginBottom: "12px" }}
               />
- 
+
               {/* Name input — styled same as modal */}
               <div style={{ marginBottom: "4px", textAlign: "left", fontSize: "10px", color: "var(--txt-m)", letterSpacing: ".06em" }}>ชื่อที่ใช้ในเกม</div>
               <div className="nm-input-wrap" style={{ marginBottom: "16px" }}>
@@ -860,7 +869,7 @@ export default function ShadowThrone() {
                 />
                 <span className="nm-char-count">{joinName.length}/12</span>
               </div>
- 
+
               <button className="btn b-gold" style={{ width: "100%", padding: "12px" }} onClick={() => joinRoom()} disabled={joinCode.length < 4 || !joinName.trim() || wsStatus !== "ok"}>
                 เข้าร่วมห้อง ⚔️
               </button>
@@ -868,7 +877,7 @@ export default function ShadowThrone() {
           )}
         </div>
       </div>
- 
+
       {/* ═══════════════════ LOBBY ═══════════════════ */}
       <div id="l" className={`screen${screen === "lobby" ? " on" : ""}`}>
         <div className="lwrap">
@@ -882,7 +891,7 @@ export default function ShadowThrone() {
                   {room.visibility === "private" ? "🔒 ส่วนตัว" : "🌐 สาธารณะ"}
                 </span>
                 <button className="b-sm" onClick={() => {
-                  navigator.clipboard?.writeText(room.code).catch(() => {});
+                  navigator.clipboard?.writeText(room.code).catch(() => { });
                   showToast("📋 คัดลอกรหัสห้องแล้ว: " + room.code);
                 }}>📋 คัดลอก</button>
                 {/* ✅ FIX 2: ปุ่มแชร์ลิงก์สำหรับเพื่อนต่างเน็ต */}
@@ -892,14 +901,14 @@ export default function ShadowThrone() {
                       // สร้างลิงก์ที่เพื่อนกดแล้ว connect server ได้ทันที
                       const serverHost = WS_URL.replace(/^wss?:\/\//, "").replace(/\/ws\/?$/, "");
                       const shareUrl = `${window.location.origin}${window.location.pathname}?server=${encodeURIComponent(serverHost)}`;
-                      navigator.clipboard?.writeText(shareUrl).catch(() => {});
+                      navigator.clipboard?.writeText(shareUrl).catch(() => { });
                       showToast("🔗 คัดลอกลิงก์แชร์แล้ว! ส่งให้เพื่อนคลิกเพื่อเข้าร่วม");
                     }}>🔗 แชร์ลิงก์</button>
                 )}
               </>
             )}
           </div>
- 
+
           {room && (
             <>
               {/* Ready dots */}
@@ -912,7 +921,7 @@ export default function ShadowThrone() {
                   {readyCount}/{room.maxPlayers} พร้อม
                 </span>
               </div>
- 
+
               {/* Player slots */}
               <div className="sbox">
                 <div className="sh">👥 ผู้เล่น ({room.players.length}/{room.maxPlayers})</div>
@@ -944,7 +953,7 @@ export default function ShadowThrone() {
                   })}
                 </div>
               </div>
- 
+
               {/* Class selection */}
               <div className="sbox">
                 <div className="sh">⚔ เลือกอาชีพของคุณ</div>
@@ -969,7 +978,7 @@ export default function ShadowThrone() {
                   ))}
                 </div>
               </div>
- 
+
               {/* Actions */}
               <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap", marginTop: "4px" }}>
                 {!isHost && (
@@ -998,7 +1007,7 @@ export default function ShadowThrone() {
           )}
         </div>
       </div>
- 
+
       {/* ═════════════ ROLE REVEAL ═════════════ */}
       {/* FIX: ทุกคนเปิดโรลพร้อมกันได้ — ไม่ต้องรอตามลำดับ */}
       <div id="rr" className={`screen${screen === "roles" ? " on" : ""}`}>
@@ -1010,9 +1019,9 @@ export default function ShadowThrone() {
           <p style={{ fontSize: "12px", color: "var(--txt-m)", marginBottom: "14px" }}>
             แตะไพ่เพื่อดูบทบาทลับของคุณ — ห้ามให้คนอื่นเห็น!
           </p>
- 
+
           <div className="warn-box">⚠ ทุกคนสามารถเปิดดูบทบาทพร้อมกัน เมื่อทุกคนกดยืนยันแล้ว เกมจะเริ่มทันที</div>
- 
+
           {/* Flip card */}
           <div className="flip-outer" onClick={() => !roleConfirmed && setFlipped(true)}>
             <div className={`flip${flipped ? " f" : ""}`}>
@@ -1030,7 +1039,7 @@ export default function ShadowThrone() {
               )}
             </div>
           </div>
- 
+
           {/* Confirm button (only after flip) */}
           {flipped && !roleConfirmed && (
             <div style={{ textAlign: "center", marginTop: "14px" }}>
@@ -1042,7 +1051,7 @@ export default function ShadowThrone() {
               </button>
             </div>
           )}
- 
+
           {roleConfirmed && (
             <div style={{ textAlign: "center", marginTop: "14px" }}>
               <div style={{ fontSize: "12px", color: "#4cc94c", marginBottom: "10px" }}>
@@ -1050,7 +1059,7 @@ export default function ShadowThrone() {
               </div>
             </div>
           )}
- 
+
           {/* Show who has confirmed */}
           {room && room.rolesReady && room.rolesReady.length > 0 && (
             <div style={{ marginTop: "16px", width: "100%", maxWidth: "360px" }}>
@@ -1069,17 +1078,16 @@ export default function ShadowThrone() {
               </div>
             </div>
           )}
- 
+
           {!flipped && (
             <div className="blink" style={{ marginTop: "16px" }}>แตะการ์ดเพื่อดูบทบาทของคุณ</div>
           )}
         </div>
       </div>
- 
+
       {/* ═════════════ GAMEBOARD ═════════════ */}
-      <div id="gb" className={`screen${screen === "gameboard" ? " on" : ""}`}>
-        {/* Waiting overlay ถ้ายังไม่ all_roles_ready */}
-        {!allRolesReady && (
+      {screen === "gameboard" && !allRolesReady && (
+        <div className="screen on" id="gb">
           <div className="wait-overlay">
             <div className="loading-spinner" />
             <div className="loading-txt">รอผู้เล่นทุกคนยืนยันบทบาท...</div>
@@ -1096,62 +1104,16 @@ export default function ShadowThrone() {
               </div>
             )}
           </div>
-        )}
- 
-        <div className="lwrap" style={{ padding: "20px", maxWidth: "720px", margin: "0 auto" }}>
-          <div className="sbox" style={{ textAlign: "center", borderColor: "var(--gold)" }}>
-            <h2 className="cinzel" style={{ color: "var(--gold)", marginBottom: "4px" }}>🏰 สมรภูมิ: บัลลังก์เงา</h2>
-            <p style={{ fontSize: "12px", color: "var(--txt-m)" }}>เกมกำลังดำเนินอยู่ — ใช้กลยุทธ์ให้ดี!</p>
-          </div>
- 
-          {/* My role card */}
-          {roleDef && (
-            <div className="sbox">
-              <div className="sh">📜 บทบาทลับของคุณ</div>
-              <div style={{ display: "flex", alignItems: "center", gap: "16px", background: "var(--s4)", padding: "12px", borderRadius: "8px", border: `1px solid ${roleDef.color}30` }}>
-                <span style={{ fontSize: "36px" }}>{roleDef.ico}</span>
-                <div>
-                  <h4 style={{ color: roleDef.color, fontFamily: "'Cinzel', serif", fontSize: "15px" }}>{roleDef.name}</h4>
-                  <p style={{ fontSize: "12px", color: "var(--txt-m)", marginTop: "3px" }}>{roleDef.why}</p>
-                  <p style={{ fontSize: "11px", color: "var(--gold-l)", marginTop: "4px" }}>🏆 {roleDef.win}</p>
-                </div>
-              </div>
-            </div>
-          )}
- 
-          {/* Player list */}
-          {room && (
-            <div className="sbox">
-              <div className="sh">🛡 นักรบในสมรภูมิ</div>
-              <table className="game-table">
-                <thead>
-                  <tr>
-                    <th>ผู้เล่น</th>
-                    <th>อาชีพ</th>
-                    <th>สถานะ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {room.players.map((p, i) => {
-                    const cls = p.class ? CLASSES[p.class] : null;
-                    return (
-                      <tr key={i} style={{ color: p.name === myName ? "var(--gold-l)" : "inherit" }}>
-                        <td>{p.name}{p.name === myName ? " (คุณ)" : ""}</td>
-                        <td>{cls ? `${cls.ico} ${cls.name}` : "—"}</td>
-                        <td style={{ color: "#4cc94c" }}>● มีชีวิต</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
- 
-          <div style={{ textAlign: "center", marginTop: "20px" }}>
-            <button className="b-danger" onClick={leaveRoom}>✕ ออกจากเกม</button>
-          </div>
         </div>
-      </div>
+      )}
+
+      {screen === "gameboard" && allRolesReady && room && (
+        <GameBoard
+          roomData={room}
+          myIdx={myIdx >= 0 ? myIdx : 0}
+          onLeave={leaveRoom}
+        />
+      )}
     </>
   );
 }
