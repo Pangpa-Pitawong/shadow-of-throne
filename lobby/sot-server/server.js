@@ -35,7 +35,7 @@ function broadcast(code) {
 function broadcastRoomList() {
   const list = Object.values(rooms).filter(
     r => r.visibility === "public" && r.status !== "started" &&
-         Date.now() - r.createdAt < 30 * 60 * 1000
+      Date.now() - r.createdAt < 30 * 60 * 1000
   );
   const msg = JSON.stringify({ type: "room_list", rooms: list });
   for (const [ws] of clients) {
@@ -49,6 +49,7 @@ function assignRoles(count) {
   for (let i = 0; i < rebelCount; i++) pool.push("rebel");
   if (count >= 4) pool.push("traitor");
   while (pool.length < count) pool.push("commoner");
+  // Fisher-Yates shuffle
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -244,7 +245,10 @@ wss.on("connection", (ws) => {
       if (!info?.code) return;
       const room = rooms[info.code];
       if (!room || room.status !== "started") return;
-      if (!room.rolesReady.includes(msg.playerName)) room.rolesReady.push(msg.playerName);
+      const playerName = room.players[info.playerIdx]?.name;
+      if (playerName && !room.rolesReady.includes(playerName)) {
+        room.rolesReady.push(playerName);
+      }
       broadcast(info.code);
       if (room.rolesReady.length >= room.players.length) {
         const readyMsg = JSON.stringify({ type: "all_roles_ready" });
@@ -258,7 +262,7 @@ wss.on("connection", (ws) => {
     if (msg.type === "list_rooms") {
       const list = Object.values(rooms).filter(
         r => r.visibility === "public" && r.status !== "started" &&
-             Date.now() - r.createdAt < 30 * 60 * 1000
+          Date.now() - r.createdAt < 30 * 60 * 1000
       );
       send(ws, { type: "room_list", rooms: list });
     }
