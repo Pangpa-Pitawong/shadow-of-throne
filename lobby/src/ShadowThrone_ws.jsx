@@ -1,286 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import GameBoard from "./game/components/GameBoard";
-
-// ─── CONFIG: Dynamic WebSocket URL ───────────────────────────────────────────
-// Priority: 1) ?server= query param  2) localStorage  3) same-host /ws
-function getWsUrl() {
-  try {
-    // ✅ FIX 1: รองรับ ?server=xxx.trycloudflare.com ใน URL
-    // เพื่อนคลิกลิงก์จาก host แล้ว connect server ได้ทันที
-    const params = new URLSearchParams(window.location.search);
-    const serverParam = params.get("server");
-    if (serverParam) {
-      // ถ้า host ส่ง ?server=xxxx.trycloudflare.com → แปลงเป็น wss://
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = serverParam.startsWith("ws") ? serverParam
-        : `${proto}//${serverParam}`;
-      // บันทึกลง localStorage ด้วยเพื่อไม่ต้องส่ง query ซ้ำ
-      try { localStorage.setItem("sot_ws_url", url); } catch { }
-      return url;
-    }
-  } catch { }
-  try {
-    const saved = localStorage.getItem("sot_ws_url");
-    if (saved && saved.startsWith("ws")) return saved;
-  } catch { }
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return "wss://sot-server-0te4.onrender.com";
-}
-const WS_URL = getWsUrl();
-
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const ROLES = {
-  king: {
-    id: "king", ico: "👑", name: "พระราชา", color: "#c9a84c",
-    why: "รักษาบัลลังก์และปกป้องอาณาจักร", win: "ครองราชย์ครบ 8 เฟส หรือปราบกบฏ"
-  },
-  rebel: {
-    id: "rebel", ico: "⚔️", name: "กบฏ", color: "#c94040",
-    why: "โค่นบัลลังก์ด้วยการรวมกำลัง", win: "ราชา HP=0 หรือยึดศาลบัลลังก์"
-  },
-  traitor: {
-    id: "traitor", ico: "🗡️", name: "คนทรยศ", color: "#8c4cc9",
-    why: "ซ่อนตัวเป็นพันธมิตร สะสมสมบัติลับ", win: "สมบัติ 5 ชิ้น หรือรอดคนสุดท้าย"
-  },
-  commoner: {
-    id: "commoner", ico: "🧑‍🌾", name: "ราษฎร", color: "#4cc94c",
-    why: "ไม่อยู่ฝ่ายใด สะสมทรัพย์สิน", win: "ทอง 10 เหรียญ หรือ Lv.5"
-  },
-};
-
-const CLASSES = {
-  warrior: { id: "warrior", ico: "⚔️", name: "นักรบ", evo: "→ คนเถื่อน → เบอร์เซิกเกอร์", hp: 12, mana: 4, move: 3, s: { STR: 5, DEX: 2, VIT: 4, INT: 1 }, ability: "โจมตีกว้าง 3 เป้าหมาย", passive: "ทนดาเมจสุดท้าย 1 ครั้ง" },
-  knight: { id: "knight", ico: "🛡️", name: "อัศวิน", evo: "→ พาราดิน → โรยัลไนท์", hp: 14, mana: 5, move: 2, s: { STR: 4, DEX: 2, VIT: 5, INT: 2 }, ability: "พระบัญชา: สั่งย้ายผู้เล่น", passive: "ลดดาเมจรับ 1 ตลอดเวลา" },
-  mage: { id: "mage", ico: "🔮", name: "นักเวทย์", evo: "→ จอมเวทย์ → นักปราญ์", hp: 7, mana: 14, move: 2, s: { STR: 1, DEX: 3, VIT: 2, INT: 7 }, ability: "เวทย์พื้นที่ 3 ช่อง", passive: "จั่วเวทย์เพิ่ม 1 ใบ/เฟส" },
-  archer: { id: "archer", ico: "🏹", name: "นักธนู", evo: "→ พลซุ่มยิง → นักล่า", hp: 9, mana: 6, move: 4, s: { STR: 2, DEX: 6, VIT: 3, INT: 2 }, ability: "ยิงข้ามกำแพง ระยะ 4", passive: "ตีคริต 15% เสมอ" },
-  rogue: { id: "rogue", ico: "🗡️", name: "โจร", evo: "→ นักฆ่า → จอมอุบาย", hp: 9, mana: 7, move: 5, s: { STR: 3, DEX: 6, VIT: 3, INT: 2 }, ability: "โจมตีด้านหลัง ATK×2", passive: "หลบ 20% เสมอ" },
-  cleric: { id: "cleric", ico: "✨", name: "นักบวช", evo: "→ บาทหลวง → บิชอป", hp: 10, mana: 10, move: 2, s: { STR: 1, DEX: 2, VIT: 4, INT: 6 }, ability: "ฟื้น HP +4 ให้พันธมิตร", passive: "ฟื้น HP +1 ทุกต้นเทิร์น" },
-};
-
-// ─── CSS ──────────────────────────────────────────────────────────────────────
-const css = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Sarabun:wght@300;400;600;700&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --gold:#c9a84c;--gold-l:#f0d080;--gold-d:#6a4010;--gold-f:rgba(201,168,76,0.08);
-  --stone:#0d0b08;--s2:#191510;--s3:#231f18;--s4:#2e2920;
-  --txt:#e8d5b0;--txt-m:#7a6848;--txt-d:#3d3528;--r:10px;
-}
-body{background:var(--stone);color:var(--txt);font-family:'Sarabun',sans-serif;font-size:14px;overflow-x:hidden;min-height:100vh}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--gold-d);border-radius:2px}
-.cinzel{font-family:'Cinzel',serif}
-.deco{font-family:'Cinzel Decorative',serif}
-.screen{display:none;min-height:100vh;flex-direction:column}
-.screen.on{display:flex}
- 
-/* ── TITLE ──────────────────────────────────────────────────── */
-#t{align-items:center;justify-content:center;text-align:center;
-  background:radial-gradient(ellipse 100% 80% at 50% 0%,#1a1208,var(--stone) 70%);
-  position:relative;overflow:hidden}
-.stars{position:absolute;inset:0;pointer-events:none;
-  background:
-    radial-gradient(1px 1px at 10% 20%,rgba(201,168,76,.5),transparent),
-    radial-gradient(1px 1px at 85% 15%,rgba(201,168,76,.3),transparent),
-    radial-gradient(1px 1px at 30% 70%,rgba(201,168,76,.2),transparent),
-    radial-gradient(2px 2px at 60% 45%,rgba(201,168,76,.15),transparent),
-    radial-gradient(1px 1px at 50% 55%,rgba(201,168,76,.25),transparent)}
-.twrap{position:relative;z-index:1;padding:40px 20px;max-width:560px;width:100%}
-.crown{font-size:72px;display:block;animation:float 3s ease-in-out infinite;
-  filter:drop-shadow(0 0 30px rgba(201,168,76,.6))}
-@keyframes float{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-14px) rotate(3deg)}}
-.tmain{font-family:'Cinzel Decorative',serif;font-size:clamp(26px,5vw,52px);color:var(--gold);
-  text-shadow:0 0 50px rgba(201,168,76,.4),0 2px 8px rgba(0,0,0,.9);letter-spacing:.06em;margin:.3em 0 .1em}
-.tsub{font-family:'Cinzel',serif;font-size:clamp(9px,1.2vw,12px);letter-spacing:.5em;color:var(--txt-m);text-transform:uppercase}
-.divl{width:240px;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:1.2rem auto}
-.lore{font-size:13px;color:var(--txt-m);line-height:2;max-width:380px;margin:0 auto 1.8rem;font-style:italic}
-.mcards{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:360px;margin:0 auto;width:100%;padding:0 16px}
-.mcard{background:var(--s3);border:1px solid rgba(201,168,76,.15);border-radius:12px;padding:16px 12px;cursor:pointer;transition:all .2s;text-align:center}
-.mcard:hover{border-color:var(--gold);background:var(--gold-f);transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,.5)}
-.mico{font-size:32px;display:block;margin-bottom:6px}
-.mnm{font-family:'Cinzel',serif;font-size:12px;color:var(--gold);margin-bottom:3px}
-.mdesc{font-size:10px;color:var(--txt-m);line-height:1.5}
- 
-/* ── BUTTONS ─────────────────────────────────────────────────── */
-.btn{font-family:'Cinzel',serif;cursor:pointer;border:none;border-radius:var(--r);transition:all .2s;letter-spacing:.04em;display:inline-flex;align-items:center;justify-content:center;gap:6px}
-.b-gold{background:linear-gradient(135deg,var(--gold-d),var(--gold));color:#0d0b09;padding:11px 28px;font-size:13px;font-weight:700;box-shadow:0 4px 20px rgba(201,168,76,.25)}
-.b-gold:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 32px rgba(201,168,76,.45)}
-.b-gold:disabled{opacity:.35;cursor:not-allowed}
-.b-ghost{background:transparent;color:var(--gold);border:1px solid rgba(201,168,76,.3);padding:9px 22px;font-size:12px}
-.b-ghost:hover{background:var(--gold-f);border-color:var(--gold)}
-.b-sm{background:rgba(201,168,76,.08);color:var(--gold-l);border:1px solid rgba(201,168,76,.2);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-family:'Sarabun',sans-serif;transition:all .15s}
-.b-sm:hover:not(:disabled){background:rgba(201,168,76,.18);border-color:var(--gold)}
-.b-sm:disabled{opacity:.3;cursor:not-allowed}
-.b-danger{background:rgba(139,26,26,.5);color:#ffaaaa;border:1px solid rgba(139,26,26,.7);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-family:'Sarabun',sans-serif;transition:all .15s}
-.b-danger:hover{background:rgba(180,30,30,.8)}
- 
-/* ── FORMS ───────────────────────────────────────────────────── */
-input,select{background:var(--s4);color:var(--txt);border:1px solid rgba(201,168,76,.2);border-radius:6px;padding:8px 12px;font-family:'Sarabun',sans-serif;font-size:13px;outline:none;width:100%}
-input:focus,select:focus{border-color:var(--gold)}
-input::placeholder{color:var(--txt-d)}
- 
-/* ── LAYOUT ──────────────────────────────────────────────────── */
-.sbox{background:var(--s3);border:1px solid rgba(201,168,76,.12);border-radius:12px;padding:16px;margin-bottom:12px}
-.sh{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.18em;color:var(--txt-m);text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.sh::after{content:'';flex:1;height:1px;background:rgba(201,168,76,.1)}
-.row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.row label{font-size:12px;color:var(--txt-m);min-width:100px;flex-shrink:0}
-.row input,.row select{flex:1}
- 
-/* ── LOBBY ───────────────────────────────────────────────────── */
-#l{background:var(--s2);align-items:center;justify-content:flex-start;padding:20px;overflow-y:auto}
-.lwrap{max-width:720px;width:100%;margin:0 auto}
-.lhdr{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-.code-badge{background:var(--s3);border:1px solid var(--gold-d);border-radius:8px;padding:5px 14px;font-family:'Cinzel',serif;font-size:15px;color:var(--gold-l);letter-spacing:.25em}
-.vis-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-family:'Sarabun',sans-serif}
-.vis-pub{background:rgba(76,201,76,.15);color:#4cc94c;border:1px solid rgba(76,201,76,.3)}
-.vis-prv{background:rgba(201,168,76,.12);color:var(--gold);border:1px solid rgba(201,168,76,.3)}
-.slots{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.slot{background:var(--s4);border:1px solid rgba(201,168,76,.1);border-radius:8px;padding:10px 12px;transition:all .2s}
-.slot.filled{border-color:rgba(201,168,76,.3)}
-.slot.ready-s{border-color:#2a7a35;background:rgba(42,122,53,.08)}
-.slot.host-s{border-color:rgba(201,168,76,.4);background:rgba(201,168,76,.04)}
-.slot.empty{opacity:.4}
-.sn{font-size:13px;font-weight:600;margin-bottom:2px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-.sc{font-size:10px;color:var(--txt-m);margin-bottom:3px}
- 
-/* ready bar */
-.rbar{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:10px}
-.rdot{width:10px;height:10px;border-radius:50%;background:var(--s4);border:1px solid var(--txt-d);transition:all .3s}
-.rdot.on{background:#4cc94c;border-color:#4cc94c;box-shadow:0 0 6px rgba(76,201,76,.5)}
- 
-/* tags */
-.tag{font-size:9px;padding:2px 8px;border-radius:4px}
-.tag-you{background:rgba(201,168,76,.2);color:var(--gold)}
-.tag-host{background:rgba(201,168,76,.3);color:var(--gold-l)}
-.tag-ready{background:rgba(42,122,53,.3);color:#4cc94c}
-.tag-roleok{background:rgba(76,201,76,.15);color:#4cc94c}
- 
-/* ── ROOM LIST ───────────────────────────────────────────────── */
-#rl{background:var(--s2);align-items:center;justify-content:flex-start;padding:20px;overflow-y:auto}
-.rlwrap{max-width:600px;width:100%;margin:0 auto}
-.tabs{display:flex;gap:8px;margin-bottom:16px}
-.tab{flex:1;background:var(--s3);border:1px solid rgba(201,168,76,.12);border-radius:8px;padding:10px;cursor:pointer;text-align:center;font-family:'Cinzel',serif;font-size:12px;color:var(--txt-m);transition:all .2s}
-.tab.on{border-color:var(--gold);color:var(--gold);background:var(--gold-f)}
-.room-card{background:var(--s3);border:1px solid rgba(201,168,76,.15);border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:all .2s}
-.room-card:hover{border-color:var(--gold);background:var(--gold-f);transform:translateX(3px)}
-.rc-code{font-family:'Cinzel',serif;font-size:15px;color:var(--gold);letter-spacing:.15em;min-width:90px}
-.rc-info{flex:1}
-.rc-host{font-size:13px;font-weight:600}
-.rc-meta{font-size:11px;color:var(--txt-m);margin-top:2px}
-.rc-count{font-family:'Cinzel',serif;font-size:13px;color:var(--gold-l);background:var(--s4);padding:4px 10px;border-radius:6px;border:1px solid var(--gold-d)}
-.empty-rooms{text-align:center;padding:48px 20px;color:var(--txt-m)}
-.join-box{background:var(--s3);border:1px solid rgba(201,168,76,.2);border-radius:12px;padding:20px;max-width:340px;margin:0 auto;text-align:center}
-.join-title{font-family:'Cinzel',serif;font-size:14px;color:var(--gold);margin-bottom:12px}
-.join-input{text-align:center;letter-spacing:.2em;font-family:'Cinzel',serif;font-size:16px;text-transform:uppercase;margin-bottom:12px}
- 
-/* ── CREATE SCREEN ───────────────────────────────────────────── */
-#cr{background:var(--s2);align-items:center;justify-content:center;padding:20px}
- 
-/* visibility toggle */
-.vis-toggle{display:flex;gap:8px;margin-bottom:8px}
-.vis-opt{flex:1;background:var(--s4);border:1.5px solid rgba(201,168,76,.15);border-radius:8px;padding:10px;cursor:pointer;text-align:center;transition:all .2s}
-.vis-opt:hover{border-color:var(--gold-d)}
-.vis-opt.sel{border-color:var(--gold);background:var(--gold-f)}
-.vis-ico{font-size:20px;margin-bottom:4px}
-.vis-nm{font-family:'Cinzel',serif;font-size:11px;color:var(--gold)}
-.vis-desc{font-size:9px;color:var(--txt-m);margin-top:2px;line-height:1.4}
- 
-/* ── CLASS GRID ──────────────────────────────────────────────── */
-.cgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.ccard{background:var(--s4);border:1.5px solid rgba(201,168,76,.12);border-radius:10px;padding:12px 8px;cursor:pointer;transition:all .2s;text-align:center}
-.ccard:hover,.ccard.sel{border-color:var(--gold);background:var(--gold-f);transform:translateY(-2px)}
-.ci{font-size:30px;margin-bottom:4px}
-.cn{font-family:'Cinzel',serif;font-size:11px;color:var(--gold);margin-bottom:3px}
-.ce{font-size:8px;color:var(--txt-d);margin-bottom:4px}
-.cst{display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-bottom:4px}
-.cs{font-size:8px;background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;color:var(--txt-m)}
-.cab{font-size:9px;color:rgba(201,168,76,.7);line-height:1.4;text-align:left}
-.cpas{font-size:8px;color:rgba(100,180,100,.7);line-height:1.3;margin-top:2px;text-align:left}
- 
-/* ── ROLE REVEAL ─────────────────────────────────────────────── */
-#rr{background:radial-gradient(ellipse at 50% 50%,#0d0a05,#040302);align-items:center;justify-content:center}
-.rrwrap{display:flex;flex-direction:column;align-items:center;padding:24px 20px;min-height:100vh;justify-content:center}
-.flip-outer{perspective:700px;cursor:pointer;margin:16px 0}
-.flip{width:220px;height:310px;position:relative;transform-style:preserve-3d;transition:transform .65s cubic-bezier(.4,0,.2,1)}
-.flip.f{transform:rotateY(180deg)}
-.fback,.ffront{position:absolute;inset:0;border-radius:14px;backface-visibility:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;border:2px solid var(--gold-d)}
-.fback{background:linear-gradient(160deg,var(--s3),var(--s2));
-  background-image:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(201,168,76,.03) 8px,rgba(201,168,76,.03) 9px)}
-.fbglyph{font-size:64px;color:var(--gold-d);opacity:.4;animation:ps 2s ease-in-out infinite}
-@keyframes ps{0%,100%{opacity:.2}50%{opacity:.6}}
-.ffront{transform:rotateY(180deg)}
-.ff-king{background:linear-gradient(160deg,#2a1800,#4a2e00)}
-.ff-rebel{background:linear-gradient(160deg,#1a0808,#3a1010)}
-.ff-traitor{background:linear-gradient(160deg,#0a0a12,#181828)}
-.ff-commoner{background:linear-gradient(160deg,#081008,#10281a)}
-.fico{font-size:56px;margin-bottom:8px;filter:drop-shadow(0 4px 12px rgba(0,0,0,.6))}
-.fnm{font-family:'Cinzel',serif;font-size:17px;color:var(--gold);margin-bottom:4px}
-.fwhy{font-size:10px;color:var(--txt-m);text-align:center;line-height:1.6}
-.fwin{font-size:9px;color:var(--gold-l);margin-top:8px;border-top:1px solid rgba(201,168,76,.2);padding-top:6px;width:100%;text-align:center;line-height:1.5}
-.blink{animation:blink 1.4s ease-in-out infinite;color:var(--txt-m);font-size:11px}
-@keyframes blink{0%,100%{opacity:.2}50%{opacity:1}}
-.warn-box{font-size:10px;color:rgba(255,180,50,.8);background:rgba(200,120,0,.1);border:1px solid rgba(200,120,0,.3);border-radius:6px;padding:7px 14px;margin-bottom:12px;text-align:center}
- 
-/* players-confirmed display */
-.confirmed-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}
-.conf-chip{font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(42,122,53,.2);border:1px solid rgba(42,122,53,.5);color:#4cc94c}
-.conf-chip.waiting{background:rgba(60,50,30,.3);border-color:rgba(201,168,76,.2);color:var(--txt-m)}
- 
-/* waiting overlay for gameboard */
-.wait-overlay{position:fixed;inset:0;background:rgba(13,11,8,.92);display:flex;flex-direction:column;
-  align-items:center;justify-content:center;z-index:50;gap:16px}
- 
-/* ── LOADING / TOAST ─────────────────────────────────────────── */
-.loading-overlay{position:fixed;inset:0;background:rgba(13,11,8,.85);display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:12px}
-.loading-spinner{width:40px;height:40px;border:3px solid var(--gold-d);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.loading-txt{font-family:'Cinzel',serif;font-size:13px;color:var(--gold);letter-spacing:.1em}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(0);
-  background:rgba(201,168,76,.92);color:#0d0b09;padding:8px 22px;border-radius:8px;
-  font-size:13px;font-family:'Sarabun',sans-serif;z-index:9999;
-  transition:opacity .3s,transform .3s;pointer-events:none}
-.toast.hide{opacity:0;transform:translateX(-50%) translateY(8px)}
- 
-/* WS badge */
-.ws-badge{font-size:10px;padding:3px 10px;border-radius:20px;font-family:'Sarabun',sans-serif;display:inline-block}
-.ws-ok{background:rgba(42,122,53,.2);color:#4cc94c;border:1px solid rgba(42,122,53,.4)}
-.ws-connecting{background:rgba(201,168,76,.1);color:var(--gold);border:1px solid rgba(201,168,76,.3);animation:pulse .9s ease-in-out infinite}
-.ws-err{background:rgba(139,26,26,.2);color:#ffaaaa;border:1px solid rgba(139,26,26,.4)}
-@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
- 
-/* game board */
-#gb{background:var(--stone);padding:20px;overflow-y:auto}
-.game-table{width:100%;border-collapse:collapse;margin:14px 0}
-.game-table th{background:rgba(201,168,76,.12);color:var(--gold-l);padding:8px 10px;font-size:12px;text-align:left;font-family:'Cinzel',serif}
-.game-table td{padding:10px 8px;border-bottom:1px solid rgba(201,168,76,.08);font-size:13px}
-.pulse{animation:pulse .9s ease-in-out infinite;font-size:11px;color:var(--txt-m);text-align:center}
- 
-/* ── NAME INPUT MODAL ─────────────────────────────────────────── */
-.name-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:800;padding:20px}
-.name-modal{background:var(--s2);border:1px solid rgba(201,168,76,.35);border-radius:16px;padding:28px 24px;width:100%;max-width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.8);animation:modal-in .2s ease-out}
-@keyframes modal-in{from{opacity:0;transform:scale(.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
-.nm-room-ico{font-size:36px;margin-bottom:8px;display:block}
-.nm-room-code{font-family:'Cinzel',serif;font-size:18px;color:var(--gold);letter-spacing:.25em;margin-bottom:2px}
-.nm-room-host{font-size:11px;color:var(--txt-m);margin-bottom:16px}
-.nm-divider{width:100%;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.25),transparent);margin-bottom:16px}
-.nm-label{font-size:11px;color:var(--txt-m);margin-bottom:6px;text-align:left;letter-spacing:.06em}
-.nm-input-wrap{position:relative;margin-bottom:16px}
-.nm-input-wrap input{padding:12px 42px 12px 16px;font-size:15px;border-radius:10px;border:1.5px solid rgba(201,168,76,.25);background:var(--s4);color:var(--txt);font-family:'Sarabun',sans-serif;width:100%;transition:border-color .2s,box-shadow .2s;letter-spacing:.03em}
-.nm-input-wrap input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,168,76,.12);outline:none}
-.nm-input-wrap input::placeholder{color:var(--txt-d);font-size:13px}
-.nm-char-count{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--txt-d);pointer-events:none}
-.nm-actions{display:flex;gap:8px}
-.nm-actions .btn{flex:1;padding:11px}
-.nm-cancel{background:rgba(255,255,255,.05);color:var(--txt-m);border:1px solid rgba(255,255,255,.1);border-radius:10px;cursor:pointer;font-family:'Sarabun',sans-serif;font-size:13px;padding:11px;flex:1;transition:all .15s}
-.nm-cancel:hover{background:rgba(255,255,255,.1)}
-`;
-
+import "./lobby/lobby.css";
+import { WS_URL } from "./lobby/wsConfig";
+import { ROLES } from "./game/constants/roles";
+import { CLASSES } from "./game/constants/classes";
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ShadowThrone() {
   // ── Screen state ──────────────────────────────────────────────────────────
   const [screen, setScreen] = useState("title");
   const [tab, setTab] = useState("browse");
+
+  const screenRef = useRef("title");
+
+  const goScreen = useCallback((s) => {
+    screenRef.current = s;
+    setScreen(s);
+  }, []);
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
   const wsRef = useRef(null);
@@ -343,6 +79,7 @@ export default function ShadowThrone() {
     let alive = true;
     let ws;
     let reconnectTimer;
+    let retryDelay = 2000; // เริ่มที่ 2 วินาที
 
     function connect() {
       if (!alive) return;
@@ -353,8 +90,11 @@ export default function ShadowThrone() {
       ws.onopen = () => {
         if (!alive) return;
         setWsStatus("ok");
-        // Re-request room list if on join screen
-        if (screen === "join") wsSend({ type: "list_rooms" });
+        retryDelay = 2000;          // reset delay เมื่อเชื่อมต่อสำเร็จ
+
+        if (screenRef.current === "gameboard") {
+          wsSend({ type: "request_game_state" });
+        }
       };
 
       ws.onmessage = (e) => {
@@ -363,12 +103,11 @@ export default function ShadowThrone() {
         try { msg = JSON.parse(e.data); } catch { return; }
 
         switch (msg.type) {
-
           // ── Server assigned us a slot ──────────────────────────────────
           case "joined":
             setRoom(msg.room);
             setLoading(false);
-            setScreen("lobby");
+            goScreen("lobby"); // ✅ ใช้ goScreen แทน setScreen
             showToast(msg.playerIdx === 0
               ? "✅ สร้างห้องสำเร็จ! รหัส: " + msg.room.code
               : "✅ เข้าห้องสำเร็จ!"
@@ -378,10 +117,9 @@ export default function ShadowThrone() {
           // ── Lobby / room state changed ─────────────────────────────────
           case "room_update": {
             setRoom(msg.room);
-
-            // If game just started → go to role reveal
-            if (msg.room.status === "started" && screen !== "roles" && screen !== "gameboard") {
-              // Find MY role index
+            if (msg.room.status === "started"
+              && screenRef.current !== "roles"      // ✅ ใช้ ref แทน state
+              && screenRef.current !== "gameboard") {
               const myIdx = msg.room.players.findIndex(
                 p => p.name === myNameRef.current
               );
@@ -390,7 +128,7 @@ export default function ShadowThrone() {
                 setFlipped(false);
                 setRoleConfirmed(false);
                 setAllRolesReady(false);
-                setScreen("roles");
+                goScreen("roles"); // ✅ ใช้ goScreen
               }
             }
             break;
@@ -403,20 +141,37 @@ export default function ShadowThrone() {
 
           // ── All players confirmed their role → open game board ─────────
           case "all_roles_ready":
+            // ✅ FIX: เก็บ gameState ที่ server ส่งมาพร้อมกัน ก่อนเปลี่ยนหน้า
+            //    (ไม่งั้น room.gameState จะเป็น null → GameBoard ไม่ render → จอดำ)
+            if (msg.gameState) {
+              setRoom(prev => prev ? { ...prev, gameState: { ...msg.gameState } } : prev);
+            }
             setAllRolesReady(true);
-            // Automatically transition (no button needed)
-            setScreen("gameboard");
+            goScreen("gameboard"); // ✅ ใช้ goScreen
             break;
 
           case "kicked":
             showToast("คุณถูกเตะออกจากห้อง");
-            setRoom(null); setMyClass(""); setMyRole(null); setScreen("title");
+            setRoom(null); setMyClass(""); setMyRole(null);
+            goScreen("title"); // ✅ ใช้ goScreen
             break;
 
           case "room_closed":
             showToast("⚠ " + (msg.reason === "host_left" ? "Host ออกจากห้องแล้ว" : "ห้องถูกปิด"));
-            setRoom(null); setMyClass(""); setMyRole(null); setScreen("title");
+            setRoom(null); setMyClass(""); setMyRole(null);
+            goScreen("title"); // ✅ ใช้ goScreen
             break;
+
+          case "game_state": {
+            const gs = msg.gameState;
+            if (!gs) break;
+            setRoom(prev => {
+              if (!prev) return prev;
+              // force new reference ทุกครั้ง
+              return { ...prev, gameState: { ...gs } };
+            });
+            break;
+          }
 
           case "error":
             showToast("❌ " + msg.msg);
@@ -431,12 +186,19 @@ export default function ShadowThrone() {
       ws.onclose = () => {
         if (!alive) return;
         setWsStatus("error");
-        reconnectTimer = setTimeout(connect, 3000);
+        retryDelay = Math.min(retryDelay * 1.5, 15000);
+        reconnectTimer = setTimeout(connect, retryDelay);
       };
-      ws.onerror = () => { if (alive) setWsStatus("error"); };
+
+      ws.onerror = () => {
+        if (!alive) return;
+        setWsStatus("error");
+        // ไม่ต้อง reconnect ที่นี่ — onclose จะทำแทน
+      };
     }
 
     connect();
+
     return () => {
       alive = false;
       clearTimeout(reconnectTimer);
@@ -454,6 +216,15 @@ export default function ShadowThrone() {
     return () => clearInterval(t);
   }, [screen, browseRooms]);
 
+  // ── Safety net: ถ้าเข้าหน้า gameboard แล้วแต่ยังไม่มี gameState → ขอซ้ำ ──────
+  useEffect(() => {
+    if (screen !== "gameboard" || !allRolesReady) return;
+    if (room?.gameState) return;
+    wsSend({ type: "request_game_state" });
+    const t = setInterval(() => wsSend({ type: "request_game_state" }), 1500);
+    return () => clearInterval(t);
+  }, [screen, allRolesReady, room?.gameState, wsSend]);
+
   // ── Save Server URL ───────────────────────────────────────────────────────
   const saveServerUrl = () => {
     try {
@@ -464,7 +235,7 @@ export default function ShadowThrone() {
         localStorage.removeItem("sot_ws_url");
       }
       window.location.reload();
-    } catch { }
+    } catch { /* localStorage ไม่พร้อมใช้งาน — ข้าม */ }
   };
 
   // ─── ACTIONS ──────────────────────────────────────────────────────────────
@@ -516,7 +287,7 @@ export default function ShadowThrone() {
     setMyRole(null);
     setRoleConfirmed(false);
     setAllRolesReady(false);
-    setScreen("title");
+    goScreen("title");
   };
 
   // ── Role reveal confirm ────────────────────────────────────────────────────
@@ -546,8 +317,6 @@ export default function ShadowThrone() {
   // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
     <>
-      <style>{css}</style>
-
       {/* LOADING */}
       {loading && (
         <div className="loading-overlay">
@@ -710,12 +479,12 @@ export default function ShadowThrone() {
             )}
           </div>
           <div className="mcards">
-            <div className="mcard" onClick={() => setScreen("create")}>
+            <div className="mcard" onClick={() => goScreen("create")}>
               <span className="mico">🏰</span>
               <div className="mnm">สร้างห้อง</div>
               <div className="mdesc">เริ่มเกมใหม่<br />3–6 ผู้เล่น</div>
             </div>
-            <div className="mcard" onClick={() => setScreen("join")}>
+            <div className="mcard" onClick={() => goScreen("join")}>
               <span className="mico">⚔️</span>
               <div className="mnm">หาห้อง / เข้าร่วม</div>
               <div className="mdesc">เลือกห้องสาธารณะ<br />หรือใส่รหัสส่วนตัว</div>
@@ -728,7 +497,7 @@ export default function ShadowThrone() {
       <div id="cr" className={`screen${screen === "create" ? " on" : ""}`}>
         <div style={{ maxWidth: "440px", width: "100%", padding: "20px" }}>
           <div className="lhdr" style={{ marginBottom: "20px" }}>
-            <button className="b-sm" onClick={() => setScreen("title")}>← กลับ</button>
+            <button className="b-sm" onClick={() => goScreen("title")}>← กลับ</button>
             <h2 className="cinzel" style={{ fontSize: "18px", color: "var(--gold)" }}>🏰 สร้างห้องใหม่</h2>
           </div>
 
@@ -751,9 +520,9 @@ export default function ShadowThrone() {
             <div className="row">
               <label>โหมดเกม:</label>
               <select value={newMode} onChange={e => setNewMode(e.target.value)}>
-                <option value="standard">มาตรฐาน (6 เฟส)</option>
-                <option value="quick">ด่วน (4 เฟส)</option>
-                <option value="epic">มหากาพย์ (8 เฟส)</option>
+                <option value="standard">มาตรฐาน (8 เฟส)</option>
+                <option value="quick">ด่วน (6 เฟส)</option>
+                <option value="epic">มหากาพย์ (10 เฟส)</option>
               </select>
             </div>
 
@@ -791,7 +560,7 @@ export default function ShadowThrone() {
       <div id="rl" className={`screen${screen === "join" ? " on" : ""}`}>
         <div className="rlwrap">
           <div className="lhdr">
-            <button className="b-sm" onClick={() => setScreen("title")}>← กลับ</button>
+            <button className="b-sm" onClick={() => goScreen("title")}>← กลับ</button>
             <h2 className="cinzel" style={{ fontSize: "18px", color: "var(--gold)" }}>⚔️ เข้าร่วมเกม</h2>
           </div>
 
@@ -799,7 +568,7 @@ export default function ShadowThrone() {
             <div className={`tab${tab === "browse" ? " on" : ""}`} onClick={() => { setTab("browse"); browseRooms(); }}>
               🔍 ห้องสาธารณะ
             </div>
-            <div className={`tab${tab === "manual" ? " on" : ""}`} onClick={() => setTab("manual")}>
+            <div className={`tab${tab === "manual" ? " on" : ""}`} onClick={() => goScreen("manual")}>
               🔒 ใส่รหัสห้อง
             </div>
           </div>
@@ -820,7 +589,7 @@ export default function ShadowThrone() {
                   <div style={{ fontSize: "11px", marginBottom: "16px", color: "var(--txt-m)" }}>
                     สร้างห้องเอง หรือใช้แท็บ "ใส่รหัสห้อง" สำหรับห้องส่วนตัว
                   </div>
-                  <button className="btn b-ghost" onClick={() => setScreen("create")}>+ สร้างห้อง</button>
+                  <button className="btn b-ghost" onClick={() => goScreen("create")}>+ สร้างห้อง</button>
                 </div>
               ) : (
                 rooms.map(r => (
@@ -1086,11 +855,14 @@ export default function ShadowThrone() {
       </div>
 
       {/* ═════════════ GAMEBOARD ═════════════ */}
-      {screen === "gameboard" && !allRolesReady && (
+      {/* ✅ FIX: แสดง overlay รอถ้ายังไม่พร้อม หรือ gameState ยังมาไม่ถึง (กันจอดำ) */}
+      {screen === "gameboard" && !(allRolesReady && room && room.gameState) && (
         <div className="screen on" id="gb">
           <div className="wait-overlay">
             <div className="loading-spinner" />
-            <div className="loading-txt">รอผู้เล่นทุกคนยืนยันบทบาท...</div>
+            <div className="loading-txt">
+              {allRolesReady ? "กำลังโหลดกระดานเกม..." : "รอผู้เล่นทุกคนยืนยันบทบาท..."}
+            </div>
             {room && (
               <div className="confirmed-row">
                 {players.map((p, i) => {
@@ -1107,11 +879,22 @@ export default function ShadowThrone() {
         </div>
       )}
 
-      {screen === "gameboard" && allRolesReady && room && (
+      {screen === "gameboard" && allRolesReady && room && room.gameState && (
         <GameBoard
           roomData={room}
+          gameState={room.gameState}
           myIdx={myIdx >= 0 ? myIdx : 0}
           onLeave={leaveRoom}
+          onGameAction={(actionType, payload) => {
+            const ws = wsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: "game_action",
+                action: actionType,
+                payload,
+              }));
+            }
+          }}
         />
       )}
     </>

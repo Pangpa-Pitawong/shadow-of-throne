@@ -1,10 +1,15 @@
 // src/game/components/HandCard.jsx
-import { WEAPON_CARDS, MAGIC_CARDS, TRAP_CARDS } from "../constants/cards.js";
+import { RARITY, normRarity } from "../constants/cards.js";
+
+const TYPE_LABEL = {
+  weapon: "🗡️ อาวุธ",
+  magic:  "🔮 เวทย์",
+  trap:   "🪤 กับดัก",
+};
 
 export default function HandCard({ card, isSelected, isMyTurn, onSelect, onHover, onLeave }) {
-  const isWeapon = WEAPON_CARDS.some(w => w.id === card.id);
-  const isMagic  = MAGIC_CARDS.some(m => m.id === card.id);
-  const rarity   = card.rarity || "common";
+  const rarity = normRarity(card.rarity);
+  const meta = RARITY[rarity];
 
   return (
     <div
@@ -13,14 +18,15 @@ export default function HandCard({ card, isSelected, isMyTurn, onSelect, onHover
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
     >
-      <span className={`card-rarity rarity-${rarity}`}>
-        {rarity === "divine" ? "✦" : rarity === "rare" ? "◆" : rarity === "secret" ? "★" : "·"}
+      <span className={`card-rarity rarity-${rarity}`} style={{ color: meta?.color }}>
+        {meta?.glyph || "·"}
       </span>
       <span className="card-ico">{card.ico}</span>
       <div className="card-nm">{card.name}</div>
       <div className="card-desc">{card.desc}</div>
       <div style={{ fontSize: "8px", marginTop: "3px", color: "var(--txt-d)" }}>
-        {isWeapon ? "🗡️ อาวุธ" : isMagic ? "🔮 เวทย์" : "🪤 กับดัก"}
+        {TYPE_LABEL[card.type] || "การ์ด"}
+        {card.type === "magic" && card.cost != null ? ` · 💧${card.cost}` : ""}
       </div>
     </div>
   );

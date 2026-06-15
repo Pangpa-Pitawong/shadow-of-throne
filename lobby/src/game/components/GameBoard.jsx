@@ -3,13 +3,10 @@ import "../styles/gameboard.css";
 
 import { ROLES } from "../constants/roles.js";
 import { CLASSES } from "../constants/classes.js";
-import { WEAPON_CARDS, MAGIC_CARDS, TRAP_CARDS } from "../constants/cards.js";
-import { TERRAIN, TERRAIN_COLORS, TERRAIN_STROKE, SPECIAL_ZONES } from "../constants/terrain.js";
-import { PHASE_EVENTS } from "../constants/events.js";
+import { RARITY, normRarity } from "../constants/cards.js";
+import { TERRAIN, TERRAIN_COLORS, TERRAIN_STROKE } from "../constants/terrain.js";
 
-import { hexToPixel, hexPoints, hexDistance, getNeighbors, getReachable } from "../utils/hexMath.js";
-import { generateHexMap } from "../utils/mapGenerator.js";
-import { createPlayers, dealStartingCards, spawnPlayers } from "../utils/gameLogic.js";
+import { hexToPixel, hexPoints, hexDistance, getReachable } from "../utils/hexMath.js";
 
 import TopBar from "./TopBar.jsx";
 import LeftPanel from "./LeftPanel.jsx";
@@ -28,11 +25,6 @@ const HEX_W = HEX_SIZE * 2;
 const HEX_H = Math.sqrt(3) * HEX_SIZE;
 const MAP_W = MAP_COLS * (HEX_W * 0.75) + HEX_W * 0.25 + 80;
 const MAP_H = MAP_ROWS * HEX_H + HEX_H * 0.5 + 100;
-const ALL_CARDS = [...WEAPON_CARDS, ...MAGIC_CARDS, ...TRAP_CARDS];
-
-function makeUid() { return `${Date.now()}-${Math.random()}`; }
-function drawCard() { return { ...ALL_CARDS[Math.floor(Math.random() * ALL_CARDS.length)], uid: makeUid() }; }
-
 // ─── EXTENDED SPECIAL ZONES ──────────────────────────────────
 // เพิ่มสถานที่ใหม่หลายแห่ง: shop, quest, event, dungeon, etc.
 const EXTENDED_SPECIAL_ZONES = {
@@ -82,166 +74,16 @@ const CATEGORY_COLORS = {
   special: { bg: "#081018", border: "#4060e0", label: "พิเศษ" },
 };
 
-// ─── SHOP ITEMS สำหรับแต่ละร้าน ──────────────────────────────
-function generateShopItems(shopType) {
-  const items = [];
-  if (shopType === "shop_weapon" || shopType === "draw_weapon") {
-    const pool = WEAPON_CARDS;
-    for (let i = 0; i < 4; i++) {
-      const card = pool[Math.floor(Math.random() * pool.length)];
-      const price = card.rarity === "divine" ? 6 : card.rarity === "secret" ? 8 : 3;
-      items.push({ ...card, uid: makeUid(), price });
-    }
-  } else if (shopType === "shop_magic") {
-    const pool = MAGIC_CARDS;
-    for (let i = 0; i < 4; i++) {
-      const card = pool[Math.floor(Math.random() * pool.length)];
-      const price = card.rarity === "divine" ? 7 : 4;
-      items.push({ ...card, uid: makeUid(), price });
-    }
-  } else if (shopType === "trade" || shopType === "shop_info") {
-    const pool = ALL_CARDS;
-    for (let i = 0; i < 5; i++) {
-      const card = pool[Math.floor(Math.random() * pool.length)];
-      const price = card.rarity === "divine" ? 6 : card.rarity === "secret" ? 8 : card.rarity === "rare" ? 4 : 2;
-      items.push({ ...card, uid: makeUid(), price });
-    }
-  } else {
-    const pool = ALL_CARDS;
-    for (let i = 0; i < 3; i++) {
-      const card = pool[Math.floor(Math.random() * pool.length)];
-      items.push({ ...card, uid: makeUid(), price: 3 });
-    }
-  }
-  return items;
-}
-
 // ─── PLAYER ICONS สำหรับแต่ละผู้เล่น ────────────────────────
 const PLAYER_ICONS = ["👑", "⚔️", "🔮", "🏹", "🗡️", "✨"];
 const PLAYER_COLORS = ["#c9a84c", "#c94040", "#8c4cc9", "#4cc94c", "#e08040", "#40c0c0"];
 const PLAYER_LABELS = ["P1", "P2", "P3", "P4", "P5", "P6"];
 
-// ─── EXTENDED MAP GENERATOR ──────────────────────────────────
-// แทนที่ generateHexMap เดิมด้วยเวอร์ชันที่มีสถานที่มากขึ้น
-function generateExtendedHexMap(cols = MAP_COLS, rows = MAP_ROWS) {
-  const terrainPool = ["plains", "plains", "plains", "forest", "forest", "mountain", "water", "desert", "swamp"];
-  const cells = [];
-
-  // กำหนดสถานที่สำคัญ (fixed positions)
-  const fixedSpecials = {
-    "6,0": "palace",
-    "6,1": "throne",
-    "2,1": "village",
-    "6,5": "market",
-    "1,8": "rebel_camp",
-    "4,5": "dark_forest",
-    "9,2": "tower",
-    "0,10": "shrine",
-    "11,9": "cave",
-    // สถานที่ใหม่
-    "3,3": "blacksmith",
-    "9,7": "alchemist",
-    "2,5": "tavern",
-    "10,4": "armory",
-    "5,9": "dungeon",
-    "7,3": "quest_board",
-    "4,1": "treasure",
-    "8,9": "farm",
-    "6,3": "river",
-    "11,5": "ruins",
-    "0,2": "watchtower",
-    "3,7": "graveyard",
-    "10,1": "volcano",
-    "5,5": "portal",
-    "12,8": "oasis",
-  };
-
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const key = `${col},${row}`;
-      const specialZone = fixedSpecials[key] || null;
-
-      let terrain;
-      if (["palace", "throne", "village", "market", "quest_board", "treasure", "river", "blacksmith", "alchemist", "tavern"].includes(specialZone)) {
-        terrain = "plains";
-      } else if (["dark_forest", "rebel_camp", "graveyard"].includes(specialZone)) {
-        terrain = "forest";
-      } else if (["cave", "dungeon", "volcano", "ruins", "armory", "watchtower"].includes(specialZone)) {
-        terrain = "mountain";
-      } else if (["shrine", "oasis"].includes(specialZone)) {
-        terrain = "plains";
-      } else if (["farm"].includes(specialZone)) {
-        terrain = "plains";
-      } else {
-        terrain = terrainPool[Math.floor(Math.random() * terrainPool.length)];
-      }
-
-      // ขอบแมพบางส่วนเป็นน้ำ
-      if ((col === 0 || col === cols - 1) && Math.random() < 0.25) terrain = "water";
-      if ((row === 0 || row === rows - 1) && Math.random() < 0.2) terrain = "water";
-
-      // ป้องกันสถานที่สำคัญเป็นน้ำ
-      if (specialZone) terrain = terrain === "water" ? "plains" : terrain;
-
-      cells.push({
-        col, row, key, terrain, specialZone,
-        players: [], trap: null, item: null,
-        shopItems: specialZone && ["shop_weapon", "shop_magic", "trade", "shop_info", "draw_weapon"].includes(
-          EXTENDED_SPECIAL_ZONES[specialZone]?.effect
-        ) ? generateShopItems(EXTENDED_SPECIAL_ZONES[specialZone]?.effect) : null,
-      });
-    }
-  }
-  return cells;
-}
-
-// ─── SPAWN ที่ขอบแมพ ─────────────────────────────────────────
-function spawnAtEdge(players, cells) {
-  // หาช่องขอบแมพทั้งหมดที่ไม่ใช่น้ำ
-  const edgeCells = cells.filter(c =>
-    c.terrain !== "water" &&
-    !c.specialZone &&
-    (c.col === 0 || c.col === MAP_COLS - 1 || c.row === 0 || c.row === MAP_ROWS - 1)
-  );
-
-  // แบ่งขอบเป็น 4 มุม เพื่อกระจายผู้เล่น
-  const corners = [
-    edgeCells.filter(c => c.col <= 2 && c.row <= 3),       // มุม TL
-    edgeCells.filter(c => c.col >= MAP_COLS - 3 && c.row <= 3), // มุม TR
-    edgeCells.filter(c => c.col <= 2 && c.row >= MAP_ROWS - 3), // มุม BL
-    edgeCells.filter(c => c.col >= MAP_COLS - 3 && c.row >= MAP_ROWS - 3), // มุม BR
-    edgeCells.filter(c => c.row === 0 || c.row === MAP_ROWS - 1), // ขอบบน/ล่าง
-    edgeCells.filter(c => c.col === 0 || c.col === MAP_COLS - 1), // ขอบซ้าย/ขวา
-  ];
-
-  const used = new Set();
-  return players.map((p, i) => {
-    const pool = (corners[i % corners.length].filter(c => !used.has(c.key)));
-    const fallback = edgeCells.filter(c => !used.has(c.key));
-    const available = pool.length > 0 ? pool : fallback;
-    if (available.length === 0) return { ...p, col: i * 2, row: 0 };
-    const cell = available[Math.floor(Math.random() * available.length)];
-    used.add(cell.key);
-    return { ...p, col: cell.col, row: cell.row };
-  });
-}
-
 // ─── MAIN COMPONENT ──────────────────────────────────────────
-export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
-  const defaultPlayers = [
-    { name: "P1 (คุณ)", classId: "warrior", role: "king" },
-    { name: "P2", classId: "mage", role: "rebel" },
-    { name: "P3", classId: "archer", role: "rebel" },
-    { name: "P4", classId: "cleric", role: "commoner" },
-  ];
-  const initPlayers = roomData?.players?.map((p, i) => ({
-    name: p.name,
-    classId: p.class || "warrior",
-    role: roomData.roles?.[i] || ["king", "rebel", "rebel", "commoner"][i % 4],
-  })) || defaultPlayers;
-
+export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, onGameAction }) {
   // ── MAP STATE ──
-  const [cells, setCells] = useState(() => generateExtendedHexMap());
+  // ✅ แก้ไข — รับ cells จาก server:
+  const [cells, setCells] = useState(() => serverGameState?.cells || []);
   const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const isDragging = useRef(false);
@@ -249,28 +91,31 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
   const mapAreaRef = useRef(null);
 
   // ── GAME STATE ──
+  // ✅ แก้ไข
   const [players, setPlayers] = useState(() => {
-    const base = createPlayers(initPlayers);
-    // เพิ่ม icon/color ให้แต่ละผู้เล่น
-    const withIcons = base.map((p, i) => ({
+    if (!serverGameState?.players) return [];
+    return serverGameState.players.map((p, i) => ({
       ...p,
-      playerIcon: PLAYER_ICONS[i] || "🧑",
-      playerColor: PLAYER_COLORS[i] || "#888",
-      playerLabel: PLAYER_LABELS[i] || `P${i + 1}`,
+      playerIcon: PLAYER_ICONS[i] ?? "🧑",
+      playerColor: PLAYER_COLORS[i] ?? "#888",
+      playerLabel: PLAYER_LABELS[i] ?? `P${i + 1}`,
     }));
-    const spawned = spawnAtEdge(withIcons, generateExtendedHexMap());
-    return spawned.map(p => ({ ...p, hand: Array.from({ length: 4 }, drawCard) }));
   });
 
   const [currentTurn, setCurrentTurn] = useState(0);
   const [phase, setPhase] = useState(1);
+  const [maxPhases, setMaxPhases] = useState(8);
+  const [fogActive, setFogActive] = useState(false);
+  const [bossMode, setBossMode] = useState(false);
+  const [bossLevel, setBossLevel] = useState(0);
   const [phaseStep, setPhaseStep] = useState(0);
-  const [actionsDone, setActionsDone] = useState({ moved: false, attacked: false, usedItem: false });
+  const [actionsDone, setActionsDone] = useState({ moved: false, attacked: false, cardsPlayed: 0 });
   const [actionMode, setActionMode] = useState(null);
   const [selectedCard, setSelectedCard] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   const [reachableCells, setReachableCells] = useState([]);
   const [attackableCells, setAttackableCells] = useState([]);
+  const [trapCells, setTrapCells] = useState([]);
 
   // ── LOG (ด้านขวา) ──
   const [log, setLog] = useState([
@@ -285,8 +130,46 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
   const [showRules, setShowRules] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [showShop, setShowShop] = useState(null); // { cell, items }
-  const [showQuest, setShowQuest] = useState(null);
+  const [showStatus, setShowStatus] = useState(false); // ช่องดูสถานะผู้เล่นทุกคน
+  const [showQuest, setShowQuest] = useState(false);   // อ่านเควสรองของตัวเองซ้ำ (ลับเฉพาะตัว)
   const [turnAnnounce, setTurnAnnounce] = useState(null);
+  const [drawReveal, setDrawReveal] = useState(null); // { cards, flipped[] } — เปิดไพ่ที่จั่วได้
+  const [drawSeen, setDrawSeen] = useState(false);     // เปิดไพ่ของเทิร์นนี้ดูแล้วหรือยัง
+  const lastDrawKeyRef = useRef("");
+
+  useEffect(() => {
+    if (!serverGameState) return;
+
+    const mergedPlayers = (serverGameState.players ?? []).map((p, i) => ({
+      ...p,
+      playerIcon: PLAYER_ICONS[i] || "🧑",
+      playerColor: PLAYER_COLORS[i] || "#888",
+      playerLabel: PLAYER_LABELS[i] || `P${i + 1}`,
+    }));
+
+    setPlayers(mergedPlayers);
+    setCells(serverGameState.cells ?? []);
+    setCurrentTurn(serverGameState.currentTurn ?? 0);
+    setPhase(serverGameState.phase ?? 1);
+    setMaxPhases(serverGameState.maxPhases ?? 8);
+    setFogActive(!!serverGameState.fogActive);
+    setBossMode(!!serverGameState.bossMode);
+    setBossLevel(serverGameState.bossLevel ?? 0);
+    setPhaseStep(serverGameState.phaseStep ?? 0);
+    setActionsDone(
+      serverGameState.actionsDone ?? {
+        moved: false,
+        attacked: false,
+        cardsPlayed: 0,
+      }
+    );
+    setLog(serverGameState.log ?? []);
+    if (serverGameState.gameOver) setGameOver(serverGameState.gameOver);
+
+    // อัปเดต ref พร้อมกัน ไม่ใช่ใน useEffect แยก
+    currentTurnRef.current = serverGameState.currentTurn ?? 0;
+
+  }, [serverGameState]);
 
   const addLog = useCallback((msg, type = "") => {
     setLog(l => [{ msg, type }, ...l.slice(0, 149)]);
@@ -336,407 +219,214 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
 
   const me = players[myIdx];
   const currentPlayer = players[currentTurn];
-  const isMyTurn = useMemo(() => currentTurn === myIdx, [currentTurn, myIdx]);
+  const isMyTurn = useMemo(
+    () => myIdx >= 0 && currentTurn === myIdx,
+    [currentTurn, myIdx]
+  );
 
-  // ── MOVE CELLS ──
+  // ── จั่วเริ่มเทิร์น: เปิดไพ่ที่เพิ่งจั่วได้ (อนิเมชันลุ้น) ──
+  useEffect(() => {
+    if (!isMyTurn || !me?.justDrew?.length) return;
+    const key = `${currentTurn}:${me.justDrew.join(",")}`;
+    if (lastDrawKeyRef.current === key) return;
+    lastDrawKeyRef.current = key;
+    const cards = me.justDrew.map(uid => me.hand?.find(c => c.uid === uid)).filter(Boolean);
+    if (cards.length) { setDrawReveal({ cards, flipped: cards.map(() => false) }); setDrawSeen(false); }
+  }, [isMyTurn, currentTurn, me?.justDrew, me?.hand]);
+
+  const flipDrawCard = useCallback((i) => {
+    setDrawReveal(d => d ? { ...d, flipped: d.flipped.map((f, j) => (j === i ? true : f)) } : d);
+  }, []);
+  const reopenDraw = useCallback(() => {
+    if (!me?.justDrew?.length) return;
+    const cards = me.justDrew.map(uid => me.hand?.find(c => c.uid === uid)).filter(Boolean);
+    if (cards.length) setDrawReveal({ cards, flipped: cards.map(() => true) });
+  }, [me?.justDrew, me?.hand]);
+
+  // ── ทิ้งการ์ดที่เกินลิมิตมือ (ผู้เล่นเลือกเอง) ──
+  const discardCard = useCallback((cardUid) => {
+    onGameAction("discard_card", { cardUid });
+  }, [onGameAction]);
+
   useEffect(() => {
     if (actionMode === "move" && !actionsDone.moved) {
       const cp = players[currentTurn];
       if (!cp) return;
-      const startCell = cells.find(c => c.col === cp.col && c.row === cp.row);
-      if (startCell) setReachableCells(getReachable(startCell, cp.move, cells, TERRAIN));
+
+      const startCell = cells.find(
+        c => c.col === cp.col && c.row === cp.row
+      );
+
+      if (startCell) {
+        const reachable = getReachable(startCell, cp.move, cells, TERRAIN);
+        setReachableCells(reachable);
+      }
     } else {
       setReachableCells([]);
     }
-  }, [actionMode, actionsDone.moved, cells, players, currentTurn]); // 👈 ต้องมี currentTurn และ players เสมอ
+  }, [
+    actionMode,
+    actionsDone.moved,
+    cells,
+    players,
+    currentTurn
+  ]);
 
   // ── ATTACK CELLS ──
   useEffect(() => {
     if (actionMode === "attack" && !actionsDone.attacked) {
       const cp = players[currentTurn];
       if (!cp) return;
-      const range = cp.classId === "archer" ? 4 : cp.classId === "mage" ? 3 : 1;
+      // ระยะโจมตีมาจากอุปกรณ์ (range) — ฐาน 0 = ตีได้แค่ช่องเดียวกัน
+      const range = cp.range ?? 0;
       const cpCell = { col: cp.col, row: cp.row };
       setAttackableCells(cells.filter(c => {
         const d = hexDistance(cpCell, c);
-        return d > 0 && d <= range;
+        return d <= range; // d=0 รวมช่องเดียวกัน
       }));
     } else {
       setAttackableCells([]);
     }
   }, [actionMode, actionsDone.attacked, cells, players, currentTurn]); // 👈 ต้องมี currentTurn และ players เสมอ
 
-  // ── ZONE EFFECT ──────────────────────────────────────────────
-  const applyZoneEffect = useCallback((cell, playerIdx) => {
-    const zone = cell.specialZone;
-    const zoneData = EXTENDED_SPECIAL_ZONES[zone];
-    if (!zone || !zoneData) return;
-
-    const effect = zoneData.effect;
-
-    // ร้านค้า → เปิด modal
-    if (["shop_weapon", "shop_magic", "trade", "shop_info"].includes(effect)) {
-      if (cell.shopItems && cell.shopItems.length > 0) {
-        setShowShop({ cell, items: cell.shopItems });
-        addLog(`🛒 ${players[playerIdx]?.name} เข้าร้าน ${zoneData.name}`, "event");
-      }
-      return;
-    }
-    // เควส
-    if (effect === "quest") {
-      setShowQuest({ playerIdx, cell });
-      addLog(`📋 ${players[playerIdx]?.name} พบกระดานเควส!`, "event");
-      return;
-    }
-
-    setPlayers(ps => ps.map((p, i) => {
-      if (i !== playerIdx) return p;
-      switch (effect) {
-        case "king_buff": case "throne":
-          if (p.role === "king") { addLog(`⚖️ ${p.name} HP+3 (บัลลังก์)`, "heal"); return { ...p, hp: Math.min(p.maxHp, p.hp + 3) }; }
-          if (p.role === "rebel") { addLog(`⚖️ ${p.name} HP-2 (ต้องแค้น)`, "dmg"); return { ...p, hp: Math.max(0, p.hp - 2) }; }
-          return p;
-        case "heal":
-          addLog(`🏘️ ${p.name} ฟื้น HP+2`, "heal"); return { ...p, hp: Math.min(p.maxHp, p.hp + 2) };
-        case "rebel_buff":
-          if (p.role === "rebel") { addLog(`⛺ กบฏ ATK+2 HP+2!`, "heal"); return { ...p, atk: p.atk + 2, hp: Math.min(p.maxHp, p.hp + 2) }; }
-          return p;
-        case "full_heal":
-          if (!p._shrineUsed) { addLog(`⛩️ ${p.name} ฟื้น HP เต็ม!`, "heal"); return { ...p, hp: p.maxHp, _shrineUsed: true }; }
-          addLog(`⛩️ ${p.name} ใช้ศาลเจ้าไปแล้ว`, ""); return p;
-        case "magic": {
-          const magic = MAGIC_CARDS[Math.floor(Math.random() * MAGIC_CARDS.length)];
-          addLog(`🗼 ${p.name} ได้เวทย์ "${magic.name}" + มานา+2`, "event");
-          return { ...p, mana: Math.min(p.maxMana, p.mana + 2), hand: [...p.hand, { ...magic, uid: makeUid() }] };
-        }
-        case "draw_weapon": case "armory": {
-          const w = WEAPON_CARDS[Math.floor(Math.random() * WEAPON_CARDS.length)];
-          addLog(`⚒️ ${p.name} ได้อาวุธ "${w.name}"`, "event");
-          return { ...p, hand: [...p.hand, { ...w, uid: makeUid() }] };
-        }
-        case "mana_well":
-          addLog(`🌊 ${p.name} มานา+3!`, "heal"); return { ...p, mana: Math.min(p.maxMana, p.mana + 3) };
-        case "farm":
-          addLog(`🌾 ${p.name} ทำนา ทอง+1`, ""); return { ...p, gold: p.gold + 1 };
-        case "treasure": case "big_loot": {
-          const roll = Math.ceil(Math.random() * 6);
-          setShowDice(roll); setTimeout(() => setShowDice(null), 800);
-          if (roll >= 4) { const c = drawCard(); addLog(`💰 ${p.name} 🎲${roll} พบสมบัติ "${c.name}"!`, "event"); return { ...p, hand: [...p.hand, c] }; }
-          else { addLog(`💰 ${p.name} 🎲${roll} ไม่พบอะไร HP-1`, "dmg"); return { ...p, hp: Math.max(0, p.hp - 1) }; }
-        }
-        case "ruins": {
-          const roll = Math.ceil(Math.random() * 6);
-          if (roll >= 4) { const c = drawCard(); addLog(`🏚️ ${p.name} 🎲${roll} ขุดพบ "${c.name}"`, "event"); return { ...p, hand: [...p.hand, c] }; }
-          else { addLog(`🏚️ ${p.name} 🎲${roll} โดนกับดักเก่า! HP-2`, "dmg"); return { ...p, hp: Math.max(0, p.hp - 2) }; }
-        }
-        case "dungeon": {
-          const roll = Math.ceil(Math.random() * 6);
-          setShowDice(roll); setTimeout(() => setShowDice(null), 800);
-          if (roll >= 5) {
-            const c1 = drawCard(), c2 = drawCard();
-            addLog(`🗝️ ${p.name} 🎲${roll} บุกดันเจี้ยน! ได้ ${c1.name} + ${c2.name} + ทอง+3`, "event");
-            return { ...p, gold: p.gold + 3, hand: [...p.hand, c1, c2] };
-          } else if (roll >= 3) {
-            const c = drawCard();
-            addLog(`🗝️ ${p.name} 🎲${roll} ดันเจี้ยน ได้ "${c.name}"`, "event");
-            return { ...p, hand: [...p.hand, c] };
-          } else {
-            addLog(`🗝️ ${p.name} 🎲${roll} ดันเจี้ยนอันตราย! HP-4`, "dmg");
-            return { ...p, hp: Math.max(0, p.hp - 4) };
-          }
-        }
-        case "cave": {
-          const roll = Math.ceil(Math.random() * 6);
-          setShowDice(roll); setTimeout(() => setShowDice(null), 800);
-          if (roll >= 4) { addLog(`🐉 ${p.name} 🎲${roll} หนีมังกร! +3 ทอง`, "event"); return { ...p, gold: p.gold + 3 }; }
-          else { addLog(`🐉 ${p.name} 🎲${roll} โดนมังกร! HP-3`, "dmg"); return { ...p, hp: Math.max(0, p.hp - 3) }; }
-        }
-        case "volcano": {
-          const roll = Math.ceil(Math.random() * 6);
-          if (roll >= 5) { addLog(`🌋 ${p.name} 🎲${roll} พลังภูเขาไฟ ATK+3!`, "event"); return { ...p, atk: p.atk + 3 }; }
-          else { addLog(`🌋 ${p.name} 🎲${roll} ลาวา! HP-4`, "dmg"); return { ...p, hp: Math.max(0, p.hp - 4) }; }
-        }
-        case "graveyard": {
-          addLog(`🪦 ${p.name} ค้นหาในสุสาน HP-1`, "dmg");
-          const c = drawCard();
-          addLog(`🪦 ได้การ์ด "${c.name}" จากวิญญาณ`, "event");
-          return { ...p, hp: Math.max(0, p.hp - 1), hand: [...p.hand, c] };
-        }
-        case "teleport": case "portal": {
-          const nonWater = cells.filter(c => c.terrain !== "water" && !c.specialZone);
-          const target = nonWater[Math.floor(Math.random() * nonWater.length)];
-          if (target) {
-            addLog(`🌀 ${p.name} เทเลพอร์ต!`, "event");
-            return { ...p, col: target.col, row: target.row };
-          }
-          return p;
-        }
-        case "oasis":
-          addLog(`🌴 ${p.name} โอเอซิส HP+3 มานา+2`, "heal");
-          return { ...p, hp: Math.min(p.maxHp, p.hp + 3), mana: Math.min(p.maxMana, p.mana + 2) };
-        case "spy": case "watchtower": {
-          const others = players.filter((_, j) => j !== playerIdx && players[j]?.alive);
-          if (others.length > 0) {
-            const target = others[Math.floor(Math.random() * others.length)];
-            addLog(`🔭 ${p.name} สอดแนม → ${target.name} เป็น ${ROLES[target.role]?.ico} ${ROLES[target.role]?.name}!`, "event");
-          }
-          return p;
-        }
-        case "trap":
-          addLog(`🌑 ${p.name} ซ่อนตัวในป่าดำได้`, ""); return p;
-        default: return p;
-      }
-    }));
-
-    // กับดักบนพื้น
-    if (cell.trap && cell.trap.ownerId !== playerIdx) {
-      const trap = cell.trap;
-      addLog(`🪤 ${players[playerIdx]?.name} โดนกับดัก "${trap.name}"!`, "dmg");
-      setPlayers(ps => ps.map((p, i) =>
-        i !== playerIdx ? p : { ...p, hp: Math.max(0, p.hp - (trap.dmg || 0)) }
-      ));
-      setCells(cs => cs.map(c => c.key === cell.key ? { ...c, trap: null } : c));
-    }
-  }, [players, cells, addLog]);
-
-  // ── CHECK WIN ──
-  const checkWin = useCallback(() => {
-    setPlayers(ps => {
-      const alive = ps.filter(p => p.alive);
-      const king = ps.find(p => p.role === "king");
-      const rebels = ps.filter(p => p.role === "rebel");
-      if (!king?.alive && rebels.some(r => r.alive))
-        setGameOver({ winner: "rebel", reason: "กบฏโค่นบัลลังก์สำเร็จ! 🏴", players: rebels.filter(r => r.alive) });
-      if (rebels.every(r => !r.alive) && king?.alive)
-        setGameOver({ winner: "king", reason: "พระราชาปราบกบฏสำเร็จ! 👑", players: [king] });
-      if (alive.length === 1)
-        setGameOver({ winner: alive[0].role, reason: `${alive[0].name} รอดคนสุดท้าย!`, players: [alive[0]] });
-      return ps;
-    });
-  }, []);
-
-  // ── ATTACK ──
-  const performAttack = useCallback((attackerId, defenderId) => {
-    const attacker = players[attackerId];
-    const defender = players[defenderId];
-    const roll = Math.ceil(Math.random() * 6);
-    setShowDice(roll); setTimeout(() => setShowDice(null), 800);
-    if (roll < 3) {
-      addLog(`🎯 ${attacker.name} โจมตี ${defender.name} — พลาด! (🎲${roll})`, "dmg");
-      setActionsDone(a => ({ ...a, attacked: true }));
-      setActionMode(null); return;
-    }
-    const crit = roll === 6;
-    const finalDmg = Math.max(1, attacker.atk + (crit ? 2 : 0) - defender.def);
-    setPlayers(ps => ps.map(p => {
-      if (p.id !== defenderId) return p;
-      const newHp = Math.max(0, p.hp - finalDmg);
-      if (newHp === 0 && p.alive) {
-        addLog(`💀 ${p.name} (${ROLES[p.role]?.ico}${ROLES[p.role]?.name}) ถูกกำจัด!`, "death");
-        setTimeout(() => checkWin(), 200);
-      }
-      return { ...p, hp: newHp, alive: newHp > 0 };
-    }));
-    addLog(`⚔️ ${attacker.name} → ${defender.name} ${finalDmg} ดาเมจ 🎲${roll}${crit ? " ✨คริต!" : ""}`, "dmg");
-    setActionsDone(a => ({ ...a, attacked: true }));
-    setActionMode(null);
-  }, [players, addLog, checkWin]);
-
-  // ── USE CARD ──
-  const useCard = useCallback((card, targetCell, playerIdx) => {
-    const cp = players[playerIdx];
-    const targetPlayer = players.find(p => p.alive && p.col === targetCell.col && p.row === targetCell.row);
-    if (MAGIC_CARDS.some(m => m.id === card.id)) {
-      if (cp.mana < (card.cost || 0)) { addLog(`❌ มานาไม่พอ`, "dmg"); return; }
-      setPlayers(ps => ps.map(p => {
-        if (p.id === playerIdx)
-          return { ...p, mana: Math.max(0, p.mana - (card.cost || 0)), hand: p.hand.filter(h => h.uid !== card.uid) };
-        if (targetPlayer && p.id === targetPlayer.id) {
-          const newHp = Math.min(p.maxHp, Math.max(0, p.hp - (card.dmg || 0) + (card.heal || 0)));
-          addLog(`✨ ${cp.name} ใช้ "${card.name}" → ${targetPlayer.name}`, "event");
-          return { ...p, hp: newHp };
-        }
-        return p;
-      }));
+  // ── TRAP CELLS — วางกับดักได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง ──
+  useEffect(() => {
+    if (actionMode === "trap" && selectedCard) {
+      const cp = players[currentTurn];
+      if (!cp) { setTrapCells([]); return; }
+      const center = { col: cp.col, row: cp.row };
+      setTrapCells(cells.filter(c =>
+        c.terrain !== "water" && !c.trap && hexDistance(center, c) <= 1));
     } else {
-      setPlayers(ps => ps.map(p => {
-        if (p.id !== playerIdx) return p;
-        addLog(`🗡️ ${cp.name} สวมใส่ "${card.name}"`, "");
-        return { ...p, atk: p.atk + (card.atk || 0), def: p.def + (card.def || 0), hand: p.hand.filter(h => h.uid !== card.uid) };
-      }));
+      setTrapCells([]);
     }
-    setActionsDone(a => ({ ...a, usedItem: true }));
-  }, [players, addLog]);
+  }, [actionMode, selectedCard, cells, players, currentTurn]);
+
+  // ── เปิดร้านค้าอัตโนมัติเมื่อเดินไปถึง (อ่าน shopItems จาก server state) ──
+  const lastCellKeyRef = useRef(null);
+  useEffect(() => {
+    if (!isMyTurn || !me) return;
+    const myCell = cells.find(c => c.col === me.col && c.row === me.row);
+    if (!myCell) return;
+    if (lastCellKeyRef.current === myCell.key) return; // เปิดครั้งเดียวต่อการมาถึง
+    lastCellKeyRef.current = myCell.key;
+    const zoneData = EXTENDED_SPECIAL_ZONES[myCell.specialZone];
+    if (zoneData
+      && ["shop_weapon", "shop_magic", "trade", "shop_info"].includes(zoneData.effect)
+      && myCell.shopItems?.length > 0) {
+      setShowShop(myCell.key);
+    }
+  }, [me?.col, me?.row, isMyTurn, cells]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // หมายเหตุ: ตรรกะ zone-effect / win-check / attack เป็น authoritative บน server
+  // (ฝั่ง client เพียง render state ที่ server ส่งมา) — โค้ดเดิมฝั่ง client ถูกถอดออก
 
   // ── CELL CLICK ──
   const currentTurnRef = useRef(currentTurn);
-  useEffect(() => { currentTurnRef.current = currentTurn; }, [currentTurn]);
+
+  // sync ref ทุกครั้งที่ state เปลี่ยน
+  useEffect(() => {
+    currentTurnRef.current = currentTurn;
+  }, [currentTurn]);
 
   const handleCellClick = useCallback((cell) => {
-    if (currentTurnRef.current !== myIdx) return;
-    const cp = players[currentTurnRef.current];
+
+    const turn = currentTurnRef.current;
+    if (turn !== myIdx || myIdx < 0) return;
+
+    const cp = players[turn];
+    if (!cp || !cp.alive) return;
 
     if (actionMode === "move") {
       if (!reachableCells.some(c => c.key === cell.key)) return;
-      setPlayers(ps => ps.map((p, i) => i === currentTurnRef.current ? { ...p, col: cell.col, row: cell.row } : p));
-      setActionsDone(a => ({ ...a, moved: true }));
-      setActionMode(null);
-      const zoneData = EXTENDED_SPECIAL_ZONES[cell.specialZone];
-      addLog(`🚶 ${cp.name} → ${zoneData?.name || TERRAIN[cell.terrain]?.name}`, "");
-      applyZoneEffect(cell, currentTurnRef.current);
-    } else if (actionMode === "attack") {
-      const target = players.find(p => p.alive && p.col === cell.col && p.row === cell.row && p.id !== currentTurnRef.current);
-      if (!target) return;
-      performAttack(currentTurnRef.current, target.id);
-    } else if (actionMode === "card" && selectedCard) {
-      useCard(selectedCard, cell, currentTurnRef.current);
-      setSelectedCard(null); setActionMode(null);
-    } else if (actionMode === "trap" && selectedCard) {
-      setCells(cs => cs.map(c => c.key === cell.key ? { ...c, trap: { ...selectedCard, ownerId: currentTurnRef.current } } : c));
-      setPlayers(ps => ps.map((p, i) => i === currentTurnRef.current ? { ...p, hand: p.hand.filter(h => h.uid !== selectedCard.uid) } : p));
-      setActionsDone(a => ({ ...a, usedItem: true }));
-      setSelectedCard(null); setActionMode(null);
-      addLog(`🪤 ${cp.name} วางกับดัก "${selectedCard.name}"`, "");
-    }
-    setSelectedCell(cell);
-  }, [actionMode, myIdx, players, reachableCells, selectedCard, applyZoneEffect, performAttack, useCard, addLog]);
 
-  // ── PHASE EVENT ──
-  const applyPhaseEvent = useCallback((ev) => {
-    setPlayers(ps => ps.map(p => {
-      if (!p.alive) return p;
-      if (ev.fx === "gold_all") return { ...p, gold: p.gold + 2 };
-      if (ev.fx === "heal_all") return { ...p, hp: Math.min(p.maxHp, p.hp + 3) };
-      if (ev.fx === "dmg_all") return { ...p, hp: Math.max(1, p.hp - 2) };
-      if (ev.fx === "atk_all") return { ...p, atk: p.atk + 1 };
-      return p;
-    }));
-  }, []);
+      onGameAction("move", {
+        col: cell.col,
+        row: cell.row,
+      });
+
+      setActionMode(null);
+    }
+
+    // ── ATTACK ─────────────────────────────
+    // ✅ แก้ handleCellClick ส่วน attack:
+    else if (actionMode === "attack") {
+      const cp = players[currentTurn]; // ← ใช้ state โดยตรง ไม่ใช่ ref
+
+      const target = players.find(
+        p =>
+          p.alive &&
+          p.col === cell.col &&
+          p.row === cell.row &&
+          p.id !== cp.id       // ← เปรียบกับ cp.id ไม่ใช่ currentTurn (index)
+      );
+
+      if (!target) return;
+
+      // hexDistance จาก utils รับ (cellA, cellB) หรือ (col,row,col,row) ตามที่ import มา
+      // ตรวจว่า import มาแบบไหน แล้วเรียกให้ตรง:
+      const distance = hexDistance({ col: cp.col, row: cp.row }, { col: target.col, row: target.row });
+      const attackRange = cp.range ?? 0;
+
+      if (distance > attackRange) return;
+
+      onGameAction("attack", { targetId: target.id });
+      setActionMode(null);
+    }
+
+    // ── USE CARD ───────────────────────────
+    else if (actionMode === "card" && selectedCard) {
+      onGameAction("use_card", {
+        cardUid: selectedCard.uid,
+        targetCol: cell.col,
+        targetRow: cell.row,
+      });
+
+      setSelectedCard(null);
+      setActionMode(null);
+    }
+
+    // ── PLACE TRAP ─────────────────────────
+    else if (actionMode === "trap" && selectedCard) {
+      // วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง (ไฮไลต์ไว้แล้ว)
+      if (!trapCells.some(c => c.key === cell.key)) return;
+
+      onGameAction("use_card", {
+        cardUid: selectedCard.uid,
+        targetCol: cell.col,
+        targetRow: cell.row
+      });
+
+      setSelectedCard(null);
+      setActionMode(null);
+    }
+
+    setSelectedCell(cell);
+
+  }, [actionMode, myIdx, currentTurn, players, reachableCells, trapCells, selectedCard, onGameAction]);
+
 
   // ─── END TURN (แก้ไขระบบส่งต่อตาและซิงค์แอกชันให้ถูกต้อง) ───
   const endTurn = useCallback(() => {
-    if (gameOver) return;
+    onGameAction("end_turn");
+  }, [onGameAction]);
 
-    setPlayers((prevPlayers) => {
-      // 1. หาผู้เล่นคนถัดไปที่ยังมีชีวิตอยู่
-      let next = (currentTurn + 1) % prevPlayers.length;
-      let guard = 0;
-      while (!prevPlayers[next]?.alive && guard < prevPlayers.length) {
-        next = (next + 1) % prevPlayers.length;
-        guard++;
-      }
-
-      // 2. คำนวณสถานะเฟสเกม
-      const aliveCount = prevPlayers.filter((p) => p.alive).length;
-      const newStep = phaseStep + 1;
-      const phaseOver = newStep >= aliveCount;
-      const newPhase = phaseOver ? phase + 1 : phase;
-
-      // ตรวจสอบเงื่อนไขจบเกม (ครบ 6 เฟส)
-      if (phaseOver && newPhase > 6) {
-        const top = [...prevPlayers].filter((p) => p.alive).sort((a, b) => b.hp - a.hp)[0];
-        setGameOver({
-          winner: top?.role || "draw",
-          reason: "ครบ 6 เฟส! ผู้ชนะโดย HP สูงสุด",
-          players: top ? [top] : [],
-        });
-        return prevPlayers;
-      }
-
-      // 3. อัปเดตข้อมูลผู้เล่นทุกคน (ลบดีบัฟ/เพิ่มมานา) จากสถานะล่าสุด (prevPlayers)
-      let updated = prevPlayers.map((p) => {
-        if (!p.alive) return p;
-
-        let hp = p.hp;
-        const effects = p.statusEffects?.map((s) => ({ ...s, duration: s.duration - 1 })).filter((s) => s.duration > 0) || [];
-        
-        p.statusEffects?.forEach((s) => {
-          if (s.type === "burn" || s.type === "poison") hp = Math.max(0, hp - 1);
-        });
-
-        return {
-          ...p,
-          hp,
-          mana: Math.min(p.maxMana, p.mana + 1),
-          statusEffects: effects,
-        };
-      });
-
-      // แจกการ์ดเมื่อจบเฟส
-      if (phaseOver) {
-        updated = updated.map((p) =>
-          !p.alive ? p : { ...p, hand: [...p.hand, drawCard(), drawCard()].slice(-8) }
-        );
-      }
-
-      // จั่วการ์ดให้คนที่มีสิทธิ์เล่นในตาถัดไป
-      updated = updated.map((p, i) =>
-        i === next ? { ...p, hand: [...p.hand, drawCard()].slice(-8) } : p
-      );
-
-      // 4. รีเซ็ตแอกชัน หน้าจอ และย้ายเทิร์น (รวบคำสั่งเพื่อให้ React ทำงานพร้อมกัน)
-      setTimeout(() => {
-        setCurrentTurn(next);
-        setPhaseStep(phaseOver ? 0 : newStep);
-        setPhase(newPhase);
-
-        // 🔥 ล้างค่าแอกชันของคนเก่าออกทันที เพื่อให้หน้าจอทุกคนซิ้งค์ใหม่
-        setActionsDone({ moved: false, attacked: false, usedItem: false });
-        setActionMode(null);
-        setSelectedCard(null);
-        setSelectedCell(null);
-        setReachableCells([]);
-        setAttackableCells([]);
-
-        const nextName = updated[next]?.name || `Player ${next + 1}`;
-        setTurnAnnounce(`🔔 เทิร์นของ ${nextName}`);
-        addLog(`🔔 เทิร์นของ ${nextName} (เฟส ${newPhase})`, "turn");
-
-        if (phaseOver) {
-          const ev = PHASE_EVENTS[Math.floor(Math.random() * PHASE_EVENTS.length)];
-          setActiveEvent(ev);
-          applyPhaseEvent(ev);
-          setTimeout(() => setActiveEvent(null), 3000);
-          addLog(`📜 เฟส ${newPhase}: ${ev.ico} ${ev.name} — ${ev.desc}`, "event");
-        }
-
-        checkWin();
-      }, 0);
-
-      return updated;
-    });
-  }, [gameOver, currentTurn, phase, phaseStep, addLog, checkWin, applyPhaseEvent, drawCard]);
-
-  // ── SHOP BUY ──
+  // ── SHOP BUY (ผ่าน server — authoritative) ──
   const handleBuy = useCallback((item, shopCell) => {
+    if (!isMyTurn) { addLog("❌ ซื้อได้เฉพาะเทิร์นของคุณ", "dmg"); return; }
     const cp = players[myIdx];
     if (!cp || cp.gold < item.price) {
       addLog(`❌ ทองไม่พอ (ต้องการ ${item.price} มี ${cp?.gold || 0})`, "dmg");
       return;
     }
-    setPlayers(ps => ps.map((p, i) => {
-      if (i !== myIdx) return p;
-      const newCard = { ...item, uid: makeUid() };
-      addLog(`🛒 ${p.name} ซื้อ "${item.name}" ราคา ${item.price} ทอง`, "event");
-      return { ...p, gold: p.gold - item.price, hand: [...p.hand, newCard].slice(-8) };
-    }));
-    // ลบสินค้าออกจากร้าน
-    setCells(cs => cs.map(c => {
-      if (c.key !== shopCell.key || !c.shopItems) return c;
-      return { ...c, shopItems: c.shopItems.filter(s => s.uid !== item.uid) };
-    }));
-    setShowShop(prev => prev ? { ...prev, items: prev.items.filter(s => s.uid !== item.uid) } : null);
-  }, [players, myIdx, addLog]);
+    // server จะหักทอง + เพิ่มการ์ด + ลบสินค้า แล้ว broadcast state ใหม่กลับมา
+    onGameAction("buy_item", { shopKey: shopCell.key, itemUid: item.uid });
+  }, [players, myIdx, isMyTurn, onGameAction, addLog]);
 
-  // ── QUEST COMPLETE ──
-  const handleQuest = useCallback((playerIdx) => {
-    setPlayers(ps => ps.map((p, i) => {
-      if (i !== playerIdx) return p;
-      addLog(`📋 ${p.name} ทำเควสสำเร็จ! +3 EXP +2 ทอง`, "event");
-      return { ...p, gold: p.gold + 2, exp: (p.exp || 0) + 3 };
-    }));
-    setShowQuest(null);
-  }, [addLog]);
+  // ── PICK SIDE QUEST (เลือกเควสรองลับ — ส่งให้ server) ──
+  const pickQuest = useCallback((questId) => {
+    onGameAction("pick_quest", { questId });
+  }, [onGameAction]);
 
   // ── MAP DRAG ──
   const handleMapMouseDown = e => {
@@ -764,10 +454,14 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
       <div className="game-root">
         {/* TOP BAR */}
         <TopBar
-          phase={phase} phaseStep={phaseStep}
+          phase={phase} phaseStep={phaseStep} maxPhases={maxPhases}
+          fogActive={fogActive} bossMode={bossMode} bossLevel={bossLevel}
           currentPlayer={currentPlayer} isMyTurn={isMyTurn}
           onEndTurn={endTurn} onCenter={centerMap}
           onToggleRules={() => setShowRules(r => !r)}
+          onToggleStatus={() => setShowStatus(s => !s)}
+          onToggleQuest={() => setShowQuest(s => !s)}
+          hasQuest={!!me?.quest}
           onLeave={onLeave}
         />
 
@@ -799,6 +493,7 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
               const { x, y } = hexToPixel(cell.col, cell.row, HEX_SIZE);
               const isReachable = reachableCells.some(c => c.key === cell.key);
               const isAttackable = attackableCells.some(c => c.key === cell.key);
+              const isTrapTarget = trapCells.some(c => c.key === cell.key);
               const isSelected = selectedCell?.key === cell.key;
               const hasEnemy = players.some(p => p.alive && p.col === cell.col && p.row === cell.row && p.id !== currentTurn);
               const zoneData = EXTENDED_SPECIAL_ZONES[cell.specialZone];
@@ -826,6 +521,8 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
                   {/* highlight reachable/attackable */}
                   {isReachable && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill="rgba(76,201,76,.22)" stroke="none" />}
                   {isAttackable && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill={`rgba(201,76,76,${hasEnemy ? .28 : .10})`} stroke="none" />}
+                  {/* highlight ช่องวางกับดักได้ (ยืน + รอบตัว 1 ช่อง) */}
+                  {isTrapTarget && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill="rgba(201,168,76,.22)" stroke="#c9a84c" strokeWidth="1.6" strokeDasharray="4 2" />}
                   {/* terrain icon */}
                   <text x={x} y={y - 10} className="hex-label" fontSize="16">{terrain.ico}</text>
                   {/* Zone icon + name */}
@@ -848,6 +545,8 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
             {/* ── Player Tokens (สัญลักษณ์ชัดเจน) ── */}
             {players.map((p, i) => {
               if (!p.alive) return null;
+              // ม่านหมอก — ซ่อนโทเคนผู้เล่นอื่น เว้นแต่ยืนช่องเดียวกัน (server ตั้ง hiddenByFog)
+              if (p.hiddenByFog && i !== myIdx) return null;
               const { x, y } = hexToPixel(p.col, p.row, HEX_SIZE);
               const cls = CLASSES[p.classId];
               const isCurrentTurn = currentTurn === i;
@@ -857,23 +556,27 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
               const offX = sameCell.length > 1 ? (slotIdx - (sameCell.length - 1) / 2) * 16 : 0;
               const tx = x + offX - 16;
               const ty = y - 12 - 16;
-              const pColor = p.playerColor || "#888";
+              const fogged = p.fogged && !isMe;
+              const pColor = fogged ? "#555" : (p.playerColor || "#888");
+              const tokenIco = fogged ? "❓" : cls?.ico;
+              const tokenName = fogged ? "ปริศนา" : p.name.slice(0, 6);
+              const showHp = !fogged; // ม่านหมอก: ไม่เผยแถบ HP ของคนอื่น
 
               return (
                 <g key={i} className={`player-token${isCurrentTurn ? " current-player" : ""}`} transform={`translate(${tx},${ty})`}>
                   {/* วงกลมพื้น */}
                   <circle cx="16" cy="16" r="16" fill={pColor} stroke={isCurrentTurn ? "#ffd700" : isMe ? "#ffffff" : "rgba(0,0,0,.5)"} strokeWidth={isCurrentTurn ? 3 : isMe ? 2 : 1} />
                   {/* class icon ใหญ่ */}
-                  <text x="16" y="16" textAnchor="middle" dominantBaseline="middle" fontSize="18">{cls?.ico}</text>
+                  <text x="16" y="16" textAnchor="middle" dominantBaseline="middle" fontSize="18">{tokenIco}</text>
                   {/* player label มุมบน */}
-                  <text x="28" y="4" fontSize="8" fill="#fff" fontWeight="bold" textAnchor="middle"
-                    style={{ textShadow: "0 0 3px #000" }}>{p.playerLabel || `P${i + 1}`}</text>
+                  {!fogged && <text x="28" y="4" fontSize="8" fill="#fff" fontWeight="bold" textAnchor="middle"
+                    style={{ textShadow: "0 0 3px #000" }}>{p.playerLabel || `P${i + 1}`}</text>}
                   {/* HP bar */}
-                  <rect x="2" y="30" width="28" height="4" rx="2" fill="rgba(0,0,0,.5)" />
-                  <rect x="2" y="30" width={28 * (p.hp / p.maxHp)} height="4" rx="2" fill={p.hp > p.maxHp * 0.5 ? "#4cc94c" : p.hp > p.maxHp * 0.25 ? "#f0d080" : "#c94040"} />
+                  {showHp && <rect x="2" y="30" width="28" height="4" rx="2" fill="rgba(0,0,0,.5)" />}
+                  {showHp && <rect x="2" y="30" width={28 * (p.hp / p.maxHp)} height="4" rx="2" fill={p.hp > p.maxHp * 0.5 ? "#4cc94c" : p.hp > p.maxHp * 0.25 ? "#f0d080" : "#c94040"} />}
                   {/* Name */}
                   <text x="16" y="42" textAnchor="middle" fontSize="7" fill="rgba(255,255,255,.9)"
-                    style={{ textShadow: "0 1px 2px #000" }}>{p.name.slice(0, 6)}</text>
+                    style={{ textShadow: "0 1px 2px #000" }}>{tokenName}</text>
                   {/* เทิร์นปัจจุบัน — ประกาย */}
                   {isCurrentTurn && <circle cx="16" cy="16" r="18" fill="none" stroke="#ffd700" strokeWidth="2" opacity="0.6" strokeDasharray="4 2" />}
                 </g>
@@ -929,17 +632,45 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
 
         {/* BOTTOM BAR */}
         <BottomBar
-          me={me} isMyTurn={isMyTurn} currentPlayer={currentPlayer} phase={phase}
+          me={me} isMyTurn={isMyTurn} currentPlayer={currentPlayer} phase={phase} maxPhases={maxPhases}
           actionsDone={actionsDone} actionMode={actionMode} selectedCard={selectedCard}
-          onMove={() => { if (!isMyTurn || actionsDone.moved) return; setActionMode(p => p === "move" ? null : "move"); }}
-          onAttack={() => { if (!isMyTurn || actionsDone.attacked) return; setActionMode(p => p === "attack" ? null : "attack"); }}
+          onMove={() => {
+            if (!isMyTurn || actionsDone.moved) return;
+            setSelectedCard(null);
+            setAttackableCells([]);
+            setActionMode(prev => prev === "move" ? null : "move");
+          }}
+          onAttack={() => {
+            if (!isMyTurn || actionsDone.attacked) return;
+            setSelectedCard(null);
+            setReachableCells([]);
+            setActionMode(prev => prev === "attack" ? null : "attack");
+          }}
           onUseCard={() => {
-            if (!selectedCard || !isMyTurn || actionsDone.usedItem) return;
-            setActionMode(TRAP_CARDS.some(t => t.id === selectedCard.id) ? "trap" : (actionMode === "card" ? null : "card"));
+            if (!selectedCard || !isMyTurn || (actionsDone.cardsPlayed || 0) >= 4) return;
+            const c = selectedCard;
+            // อาวุธ/เกราะ → สวมทันที ไม่ต้องเลือกช่อง
+            if (c.type === "weapon") {
+              onGameAction("use_card", { cardUid: c.uid });
+              setSelectedCard(null); setActionMode(null);
+              return;
+            }
+            // กับดัก → ต้องเลือกช่องวาง
+            if (c.type === "trap") { setActionMode(actionMode === "trap" ? null : "trap"); return; }
+            // เวทย์: self/team/none → ใช้ทันที | enemy/ally/tile → เลือกเป้าบนแมพ
+            const t = c.target || "enemy";
+            if (t === "self" || t === "team" || t === "none") {
+              onGameAction("use_card", { cardUid: c.uid });
+              setSelectedCard(null); setActionMode(null);
+              return;
+            }
+            setActionMode(actionMode === "card" ? null : "card");
           }}
           onEndTurn={endTurn}
           onSelectCard={card => { setSelectedCard(card); setActionMode(null); }}
           setTooltip={setTooltip}
+          onDeckClick={reopenDraw}
+          deckReady={isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)}
         />
       </div>
 
@@ -1038,24 +769,29 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
       )}
 
       {/* ═══ SHOP MODAL ═══ */}
-      {showShop && (
+      {showShop && (() => {
+        const shopCell = cells.find(c => c.key === showShop);
+        if (!shopCell) return null;
+        const shopItems = shopCell.shopItems || [];
+        const zoneData = EXTENDED_SPECIAL_ZONES[shopCell.specialZone];
+        return (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setShowShop(null)}>
           <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.4)", borderRadius: "16px", padding: "24px", maxWidth: "460px", width: "90%", maxHeight: "80vh", overflowY: "auto" }}
             onClick={e => e.stopPropagation()}>
             <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "4px", fontSize: "16px" }}>
-              {EXTENDED_SPECIAL_ZONES[showShop.cell.specialZone]?.ico} {EXTENDED_SPECIAL_ZONES[showShop.cell.specialZone]?.name}
+              {zoneData?.ico} {zoneData?.name}
             </h3>
             <div style={{ fontSize: "11px", color: "var(--txt-m)", marginBottom: "14px" }}>
               💰 ทองของคุณ: <span style={{ color: "var(--gold-l)", fontWeight: "bold" }}>{me?.gold || 0}</span>
             </div>
-            {showShop.items.length === 0 ? (
+            {shopItems.length === 0 ? (
               <div style={{ textAlign: "center", padding: "24px", color: "var(--txt-m)" }}>
                 สินค้าหมดแล้ว 😔
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                {showShop.items.map(item => (
+                {shopItems.map(item => (
                   <div key={item.uid} style={{
                     background: "var(--s3)", border: "1px solid rgba(201,168,76,.2)",
                     borderRadius: "10px", padding: "10px", textAlign: "center",
@@ -1063,8 +799,8 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
                     <span style={{ fontSize: "24px" }}>{item.ico}</span>
                     <div style={{ fontFamily: "'Cinzel',serif", fontSize: "10px", color: "var(--gold)", marginTop: "4px" }}>{item.name}</div>
                     <div style={{ fontSize: "9px", color: "var(--txt-m)", margin: "3px 0" }}>{item.desc || item.effect}</div>
-                    <div style={{ fontSize: "11px", color: item.rarity === "divine" ? "#ffd700" : item.rarity === "secret" ? "#c080ff" : item.rarity === "rare" ? "#80a0ff" : "#aaa", marginBottom: "6px" }}>
-                      {item.rarity === "divine" ? "✦ สมบัติ" : item.rarity === "secret" ? "★ ลึกลับ" : item.rarity === "rare" ? "◆ หายาก" : "· ธรรมดา"}
+                    <div style={{ fontSize: "11px", color: RARITY[normRarity(item.rarity)]?.color || "#aaa", marginBottom: "6px" }}>
+                      {RARITY[normRarity(item.rarity)]?.glyph} {RARITY[normRarity(item.rarity)]?.label}
                     </div>
                     <button
                       style={{
@@ -1075,7 +811,7 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
                         fontSize: "11px", fontFamily: "'Cinzel',serif", width: "100%",
                       }}
                       disabled={!isMyTurn || (me?.gold || 0) < item.price}
-                      onClick={() => handleBuy(item, showShop.cell)}
+                      onClick={() => handleBuy(item, shopCell)}
                     >
                       💰 {item.price} ทอง
                     </button>
@@ -1089,51 +825,336 @@ export default function GameBoard({ roomData, myIdx = 0, onLeave }) {
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
-      {/* ═══ QUEST MODAL ═══ */}
-      {showQuest && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => setShowQuest(null)}>
-          <div style={{ background: "var(--s2)", border: "1px solid rgba(64,192,128,.4)", borderRadius: "16px", padding: "24px", maxWidth: "360px", width: "90%", textAlign: "center" }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: "48px", marginBottom: "8px" }}>📋</div>
-            <h3 style={{ fontFamily: "'Cinzel',serif", color: "#40c080", marginBottom: "8px" }}>เควสได้รับ!</h3>
-            <div style={{ fontSize: "13px", color: "var(--txt-m)", marginBottom: "16px", lineHeight: 1.8 }}>
-              ช่วยชาวบ้านพาสัตว์กลับฟาร์ม<br />
-              <span style={{ color: "var(--gold)" }}>รางวัล: +3 EXP, +2 ทอง</span>
+      {/* ═══ QUEST PICK MODAL — เลือกเควสรองลับ (3 ตัวเลือกสุ่ม) ═══ */}
+      {me?.questChoices?.length > 0 && !me?.quest && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.88)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div style={{ background: "var(--s2)", border: "1px solid rgba(64,192,128,.4)", borderRadius: "16px", padding: "24px", maxWidth: "560px", width: "100%" }}>
+            <div style={{ textAlign: "center", marginBottom: "6px" }}>
+              <div style={{ fontSize: "40px" }}>📜</div>
+              <h3 style={{ fontFamily: "'Cinzel',serif", color: "#40c080", margin: "4px 0" }}>เลือกเควสรองลับของคุณ</h3>
+              <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: 1.6 }}>
+                เลือก 1 จาก 3 ภารกิจ — เดินไปยังสถานที่เป้าหมายเพื่อทำให้สำเร็จ<br />
+                🔒 เควสนี้เป็นความลับ ผู้เล่นอื่นมองไม่เห็น
+              </div>
             </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: "8px", color: "var(--txt-m)", cursor: "pointer", fontSize: "12px" }}
-                onClick={() => setShowQuest(null)}>ปฏิเสธ</button>
-              <button style={{ flex: 1, padding: "10px", background: "linear-gradient(135deg,#204a30,#40c080)", border: "none", borderRadius: "8px", color: "#fff", cursor: "pointer", fontSize: "12px", fontFamily: "'Cinzel',serif" }}
-                onClick={() => handleQuest(showQuest.playerIdx)}>ยอมรับ ✓</button>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px", marginTop: "14px" }}>
+              {me.questChoices.map(q => (
+                <div key={q.id}
+                  onClick={() => pickQuest(q.id)}
+                  style={{ background: "var(--s3)", border: "1px solid rgba(64,192,128,.25)", borderRadius: "10px", padding: "12px 14px", cursor: "pointer", transition: "transform .1s" }}
+                  onMouseEnter={e => e.currentTarget.style.transform = "scale(1.01)"}
+                  onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "28px" }}>{q.ico}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", fontSize: "13px" }}>{q.name}</div>
+                      <div style={{ fontSize: "11px", color: "var(--txt-m)", margin: "2px 0" }}>{q.desc}</div>
+                      <div style={{ fontSize: "10px", color: "#40c080" }}>
+                        🏆 รางวัล: {[
+                          q.reward.gold && `+${q.reward.gold} ทอง`, q.reward.exp && `+${q.reward.exp} EXP`,
+                          q.reward.hp && `+${q.reward.hp} HP`, q.reward.mana && `+${q.reward.mana} มานา`,
+                          q.reward.atk && `+${q.reward.atk} ATK`, q.reward.def && `+${q.reward.def} DEF`,
+                          q.reward.cards && `+${q.reward.cards} การ์ด`,
+                        ].filter(Boolean).join(", ")}
+                        {q.visitCount > 1 ? ` · ต้องไป ${q.visitCount} ครั้ง` : ""}
+                      </div>
+                      <div style={{ fontSize: "9px", color: "var(--txt-d)", fontStyle: "italic", marginTop: "2px" }}>💬 {q.hint}</div>
+                    </div>
+                    <span style={{ color: "#40c080", fontSize: "12px" }}>เลือก →</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* RULES */}
-      {showRules && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => setShowRules(false)}>
-          <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.3)", borderRadius: "16px", padding: "24px", maxWidth: "480px", width: "90%", maxHeight: "80vh", overflowY: "auto" }}
+      {/* ═══ STATUS VIEW MODAL — ดูค่าสถานะ/อุปกรณ์ผู้เล่นทุกคน ═══ */}
+      {showStatus && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: 310, display: "flex", alignItems: "center", justifyContent: "center", overflowY: "auto", padding: "16px" }}
+          onClick={() => setShowStatus(false)}>
+          <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.35)", borderRadius: "16px", padding: "22px", maxWidth: "720px", width: "100%", maxHeight: "86vh", overflowY: "auto" }}
             onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "12px", fontSize: "16px" }}>📖 กฎการเล่น</h3>
+            <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "4px", fontSize: "16px", textAlign: "center" }}>📊 สถานะผู้เล่นทั้งหมด</h3>
+            <div style={{ fontSize: "10px", color: "var(--txt-m)", textAlign: "center", marginBottom: "14px" }}>
+              {fogActive ? "🌫️ ม่านหมอกปกคลุม — ข้อมูลของผู้เล่นอื่นถูกปกปิด (ยกเว้นพระราชา)" : "อุปกรณ์สวมใส่ · สถานะ · ค่าพลังปัจจุบัน"}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))", gap: "10px" }}>
+              {players.map((p, i) => {
+                const cls = CLASSES[p.classId] || CLASSES.hidden;
+                const role = ROLES[p.role];
+                return (
+                  <div key={i} style={{ background: "var(--s3)", border: `1px solid ${p.alive ? "rgba(201,168,76,.2)" : "rgba(192,64,64,.3)"}`, borderRadius: "10px", padding: "12px", opacity: p.alive ? 1 : 0.6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                      <span style={{ fontSize: "22px" }}>{p.alive ? cls?.ico : "💀"}</span>
+                      <div>
+                        <div style={{ fontSize: "12px", color: "var(--gold-l)", fontWeight: 600 }}>{p.name}{i === myIdx ? " (คุณ)" : ""}</div>
+                        <div style={{ fontSize: "9px", color: "var(--txt-m)" }}>{role ? `${role.ico} ${role.name}` : "❓ บทบาทลับ"}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "10px", color: "var(--txt-m)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 8px", marginBottom: "6px" }}>
+                      <span>❤ HP {p.hp}/{p.maxHp}</span>
+                      <span>💧 มานา {p.mana}/{p.maxMana}</span>
+                      <span>⚔️ ATK {p.atk}</span>
+                      <span>🛡️ DEF {p.def}</span>
+                      <span>🗺 SPD {p.move}</span>
+                      <span>🎯 ระยะ {p.range ?? 0}</span>
+                      <span>💰 {p.gold}</span>
+                      <span>⭐ Lv.{p.level || 1}</span>
+                    </div>
+                    <div style={{ fontSize: "9px", color: "var(--gold)", marginBottom: "2px" }}>🎒 อุปกรณ์สวมใส่</div>
+                    <div style={{ fontSize: "10px", color: "var(--txt-m)", marginBottom: "6px", minHeight: "16px" }}>
+                      {p.equipment?.length > 0
+                        ? p.equipment.map((e, ei) => (
+                            <span key={ei} style={{ display: "inline-block", marginRight: "4px" }}>
+                              {e.ico} {e.name}{e.atk ? ` +${e.atk}A` : ""}{e.def ? ` +${e.def}D` : ""}{e.range ? ` ระยะ${e.range}` : ""}
+                            </span>
+                          ))
+                        : <span style={{ color: "var(--txt-d)" }}>— ไม่มี —</span>}
+                    </div>
+                    <div style={{ fontSize: "9px", color: "#c08040", marginBottom: "2px" }}>✨ สถานะ</div>
+                    <div style={{ fontSize: "10px", color: "var(--txt-m)", minHeight: "14px" }}>
+                      {p.statusEffects?.length > 0
+                        ? p.statusEffects.map((s, si) => <span key={si} style={{ marginRight: "5px" }}>{s.type} ({s.duration}t)</span>)
+                        : <span style={{ color: "var(--txt-d)" }}>— ปกติ —</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "14px" }} onClick={() => setShowStatus(false)}>✓ ปิด</button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ QUEST READ MODAL — อ่านเควสรองของตัวเองซ้ำ (ลับเฉพาะตัว) ═══ */}
+      {showQuest && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: 312, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onClick={() => setShowQuest(false)}>
+          <div style={{ background: "var(--s2)", border: "1px solid rgba(64,192,128,.4)", borderRadius: "16px", padding: "24px", maxWidth: "460px", width: "100%" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontFamily: "'Cinzel',serif", color: "#40c080", marginBottom: "4px", fontSize: "16px", textAlign: "center" }}>📜 เควสรองของคุณ</h3>
+            <div style={{ fontSize: "10px", color: "var(--txt-m)", textAlign: "center", marginBottom: "16px" }}>
+              🔒 ความลับเฉพาะตัว — ผู้เล่นอื่นมองไม่เห็น
+            </div>
+            {me?.quest ? (() => {
+              const q = me.quest;
+              const zoneName = EXTENDED_SPECIAL_ZONES[q.targetZone]?.name || q.targetZone;
+              const zoneIco = EXTENDED_SPECIAL_ZONES[q.targetZone]?.ico || "📍";
+              return (
+                <div style={{ background: "var(--s3)", border: `1px solid ${q.done ? "rgba(76,201,76,.4)" : "rgba(64,192,128,.25)"}`, borderRadius: "12px", padding: "16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "32px" }}>{q.ico}</span>
+                    <div>
+                      <div style={{ fontFamily: "'Cinzel',serif", color: q.done ? "#4cc94c" : "var(--gold)", fontSize: "15px" }}>
+                        {q.name} {q.done ? "✓ สำเร็จแล้ว" : ""}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "var(--txt-m)" }}>{q.desc}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#40c080", marginBottom: "4px" }}>
+                    🎯 เป้าหมาย: {zoneIco} {zoneName}
+                    {q.visitCount > 1 ? ` · ต้องไป ${q.visitCount} ครั้ง` : ""}
+                  </div>
+                  {!q.done && (
+                    <div style={{ fontSize: "11px", color: "var(--txt-m)", marginBottom: "4px" }}>
+                      📈 คืบหน้า: {q.progress || 0}/{q.visitCount || 1}
+                    </div>
+                  )}
+                  <div style={{ fontSize: "11px", color: "var(--gold-l)", marginBottom: "4px" }}>
+                    🏆 รางวัล: {[
+                      q.reward?.gold && `+${q.reward.gold} ทอง`, q.reward?.exp && `+${q.reward.exp} EXP`,
+                      q.reward?.hp && `+${q.reward.hp} HP`, q.reward?.mana && `+${q.reward.mana} มานา`,
+                      q.reward?.atk && `+${q.reward.atk} ATK`, q.reward?.def && `+${q.reward.def} DEF`,
+                      q.reward?.cards && `+${q.reward.cards} การ์ด`,
+                    ].filter(Boolean).join(", ")}
+                  </div>
+                  <div style={{ fontSize: "10px", color: "var(--txt-d)", fontStyle: "italic" }}>💬 {q.hint}</div>
+                </div>
+              );
+            })() : (
+              <div style={{ textAlign: "center", padding: "20px", color: "var(--txt-m)", fontSize: "12px" }}>
+                ยังไม่ได้เลือกเควสรอง — เลือกจากหน้าต่างตอนเริ่มเกม
+              </div>
+            )}
+            <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "16px" }} onClick={() => setShowQuest(false)}>✓ ปิด</button>
+          </div>
+        </div>
+      )}
+
+      {/* RULES — กฎละเอียด + หมวดวิธีเล่น */}
+      {showRules && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onClick={() => setShowRules(false)}>
+          <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.3)", borderRadius: "16px", padding: "24px", maxWidth: "640px", width: "100%", maxHeight: "86vh", overflowY: "auto" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "4px", fontSize: "18px", textAlign: "center" }}>📖 คู่มือการเล่น บัลลังก์เงา</h3>
+            <div style={{ fontSize: "11px", color: "var(--txt-m)", textAlign: "center", marginBottom: "16px" }}>
+              เกมวางแผนชิงไหวชิงพริบ ผสมดวงลูกเต๋า — เอาตัวรอดและพิชิตเป้าหมายฝ่ายของคุณ
+            </div>
+
             {[
-              ["🎯 เป้าหมาย", "แต่ละฝ่ายมีเป้าหมายลับ — ราชารักษาบัลลังก์, กบฏโค่นบัลลังก์, คนทรยศสะสมสมบัติ"],
-              ["🚶 การเดิน", "คลิก 'เดิน' แล้วเลือก hex สีเขียว ระยะขึ้นกับ SPD ของอาชีพ"],
-              ["⚔️ การโจมตี", "คลิก 'โจมตี' แล้วเลือก hex ศัตรูสีแดง 🎲3+ = โจมตีถูก, 6 = คริต!"],
-              ["🛒 ร้านค้า", "เดินไปสถานที่ icon 🛒 เพื่อเปิดร้านซื้อการ์ด ต้องมีทองเพียงพอ"],
-              ["📋 เควส", "เดินไปกระดานเควส 📋 รับภารกิจ ทำสำเร็จได้ EXP + ทอง"],
-              ["📜 เฟส", "ทุกคนเล่นครบ 1 รอบ = 1 เฟส เกิดเหตุการณ์สุ่ม จั่วการ์ดเพิ่ม"],
-            ].map(([t, d]) => (
-              <div key={t} style={{ marginBottom: "10px" }}>
-                <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", fontSize: "12px", marginBottom: "4px" }}>{t}</div>
-                <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: "1.6" }}>{d}</div>
+              {
+                cat: "🎯 เป้าหมายและบทบาท", items: [
+                  ["บทบาทลับ", "เริ่มเกมทุกคนได้บทบาทลับ ยกเว้น 👑 พระราชาที่ต้องเปิดเผยตัวต่อทุกคน บทบาทอื่นจะถูกปิดไว้จนกว่าผู้เล่นนั้นจะแพ้ (ตาย) จึงเปิดเผย"],
+                  ["พระราชา 👑", "รักษาบัลลังก์ ปราบกบฏให้หมด หรืออยู่รอดครบทุกเฟส"],
+                  ["กบฏ ⚔️", "โค่นพระราชา (HP=0) เพื่อยึดอำนาจ"],
+                  ["คนทรยศ/ราษฎร", "สะสมทรัพย์ เอาตัวรอดเป็นคนสุดท้าย"],
+                ]
+              },
+              {
+                cat: "🔄 ระบบเทิร์นและเฟส", items: [
+                  ["ลำดับเล่น", "พระราชาเปิดตัวและเริ่มเล่นก่อน จากนั้นสุ่มลำดับผู้เล่นที่เหลือ เมื่อทุกคนเล่นครบ 1 รอบ = 1 เฟส"],
+                  ["จำนวนเฟส", `เกมมีทั้งหมด ${maxPhases} เฟส เมื่อทุกคนเล่นครบรอบจะขึ้นเฟสใหม่และเกิดเหตุการณ์สุ่มประจำเฟส (การ์ดจั่วเริ่มเทิร์น 2 ใบทุกเทิร์น)`],
+                  ["👹 โหมดบอส", "หากเล่นครบทุกเฟสยังไม่มีผู้ชนะ บอสจะปรากฏและโจมตีทุกคนทุกเทิร์น แรงขึ้นเรื่อยๆ จนเหลือผู้ชนะ"],
+                  ["🌫️ ม่านหมอก", "เฟสคู่จะเกิดม่านหมอก — ตัวละครของผู้เล่นอื่นจะหายไปจากแมพ (มองไม่เห็นตำแหน่ง/ชื่อ/อุปกรณ์) ยกเว้นผู้ที่ยืนช่องเดียวกันกับคุณจะเห็นได้ เมื่อจบเฟสม่านหมอกตัวละครทั้งหมดจะกลับมาแสดง — เฟส 1 แสดงเสมอ"],
+                ]
+              },
+              {
+                cat: "🚶 การเดินและระยะ", items: [
+                  ["ระยะเดิน", "ทุกอาชีพเดินได้ระยะ 3 ต่อเทิร์น (ภูเขา/ป่า/หนองน้ำใช้ค่าเดินมากกว่า น้ำผ่านไม่ได้)"],
+                  ["⚔️ ระยะโจมตีปกติ", "โจมตีได้แค่ช่องเดียวกันเท่านั้น (ต้องเดินไปยืนบนช่องศัตรู) — ยกเว้นสวมอุปกรณ์ที่ให้ระยะไกล เช่น ธนู/ไม้เท้า"],
+                ]
+              },
+              {
+                cat: "🎲 การต่อสู้และดวง", items: [
+                  ["ทอยโจมตี vs หลบ", "ผู้โจมตีทอย d6 + โบนัส ATK ฝ่ายตั้งรับทอย d6 + โบนัสหลบ (จากความเร็วและเลือดที่เหลือ)"],
+                  ["ดวงมวยรอง", "ถ้าค่าสถานะตัวละคร 2 ฝ่ายห่างกันมาก ฝ่ายที่อ่อนกว่าจะได้โบนัสหลบเพิ่ม ทำให้พลิกเกมได้ด้วยดวง"],
+                  ["ผลทอย", "ถ้าแต้มตั้งรับ ≥ แต้มโจมตี = หลบสำเร็จ · ทอย 6 = คริติคอล · ทอย 1 = พลาดเสมอ"],
+                ]
+              },
+              {
+                cat: "🃏 การ์ดและอุปกรณ์", items: [
+                  ["ถือไพ่จำกัด", "ถือการ์ดในมือได้ไม่เกินค่า HP ปัจจุบัน (สูงสุด 10 ใบ) ถ้าเกินลิมิตจะต้องเลือกทิ้งเอง"],
+                  ["จั่วเริ่มเทิร์น", "เริ่มเทิร์นจั่วการ์ด 2 ใบจากกองจั่ว — คลิกเปิดไพ่เพื่อลุ้น แล้วเก็บเข้ามือ"],
+                  ["ใช้การ์ดได้ 4 ใบ/เทิร์น", "แต่ละเทิร์นใช้การ์ดได้ไม่เกิน 4 ใบ (รวมอาวุธ/เวทย์/กับดัก) — แยกจากการเดินและการโจมตี"],
+                  ["อาวุธ/เกราะ", "ใช้เพื่อสวมใส่ถาวร เพิ่ม ATK/DEF/ระยะ และเอฟเฟกต์ (เผา/แช่แข็ง/สะท้อน ฯลฯ)"],
+                  ["เวทมนตร์", "ใช้มานา ทำดาเมจ/ฟื้น HP/ติดสถานะ บางใบเป็น AOE โดนหลายเป้า"],
+                  ["กับดัก", "วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง (ช่องที่วางได้จะถูกไฮไลต์) ศัตรูที่เดินเหยียบจะติดผล (ดาเมจ/พิษ/ล็อก/ตาบอด/เผา/แช่แข็ง/สลายเกราะ)"],
+                ]
+              },
+              {
+                cat: "🗺️ สถานที่และเควส", items: [
+                  ["สถานที่พิเศษ", "เดินไปสถานที่ต่างๆ เพื่อรับผล เช่น ร้านค้า 🛒 ฟื้นเลือด รับการ์ด หรือเสี่ยงดวง (กดปุ่ม 📍 Legend ดูทั้งหมด)"],
+                  ["📜 เควสรองลับ", "ทุกคนเลือกเควสรอง 1 จาก 3 ตอนเริ่มเกม (ลับเฉพาะตัว คนอื่นไม่เห็น) เดินไปสถานที่เป้าหมายเพื่อรับรางวัล"],
+                  ["📊 ดูสถานะ", "กดปุ่ม 📊 สถานะ บนแถบบน เพื่อดูอุปกรณ์และสถานะของผู้เล่นทุกคน"],
+                ]
+              },
+            ].map(sec => (
+              <div key={sec.cat} style={{ marginBottom: "16px" }}>
+                <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold-l)", fontSize: "13px", marginBottom: "8px", paddingBottom: "4px", borderBottom: "1px solid rgba(201,168,76,.2)" }}>{sec.cat}</div>
+                {sec.items.map(([t, d]) => (
+                  <div key={t} style={{ marginBottom: "8px" }}>
+                    <div style={{ color: "var(--gold)", fontSize: "12px", marginBottom: "2px", fontWeight: 600 }}>{t}</div>
+                    <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: "1.6" }}>{d}</div>
+                  </div>
+                ))}
               </div>
             ))}
-            <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "8px" }} onClick={() => setShowRules(false)}>ปิด</button>
+
+            <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "4px" }} onClick={() => setShowRules(false)}>✓ เข้าใจแล้ว</button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ DRAW REVEAL — เปิดไพ่ที่จั่วได้เริ่มเทิร์น (ลุ้น) ═══ */}
+      {drawReveal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", padding: "16px" }}>
+          <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", fontSize: "18px", marginBottom: "4px" }}>🎴 จั่วการ์ดเริ่มเทิร์น</div>
+          <div style={{ fontSize: "11px", color: "var(--txt-m)", marginBottom: "18px" }}>
+            {drawReveal.flipped.every(Boolean) ? "ได้การ์ดเหล่านี้!" : "คลิกการ์ดในกองเพื่อเปิดดู — ลุ้นกันหน่อย!"}
+          </div>
+          <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
+            {/* กองจั่ว */}
+            <div style={{ position: "relative", width: "74px", height: "104px" }}>
+              {[0, 1, 2].map(k => (
+                <div key={k} style={{
+                  position: "absolute", top: -k * 2, left: -k * 2, width: "74px", height: "104px",
+                  borderRadius: "10px", background: "linear-gradient(135deg,#241c10,#3a2c14)",
+                  border: "1px solid rgba(201,168,76,.4)", boxShadow: "2px 3px 0 rgba(0,0,0,.4)",
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: "32px",
+                }}>{k === 2 ? "🂠" : ""}</div>
+              ))}
+            </div>
+            <span style={{ fontSize: "22px", color: "var(--gold)" }}>→</span>
+            {/* การ์ดที่จั่วได้ */}
+            {drawReveal.cards.map((card, i) => {
+              const flipped = drawReveal.flipped[i];
+              return (
+                <div key={card.uid || i}
+                  onClick={() => !flipped && flipDrawCard(i)}
+                  style={{
+                    width: "108px", minHeight: "150px", borderRadius: "12px", padding: "10px",
+                    background: flipped ? "linear-gradient(160deg,var(--s3),var(--s2))" : "linear-gradient(135deg,#241c10,#3a2c14)",
+                    border: `2px solid ${flipped ? "var(--gold)" : "rgba(201,168,76,.4)"}`,
+                    boxShadow: flipped ? "0 0 18px rgba(201,168,76,.45)" : "2px 3px 0 rgba(0,0,0,.4)",
+                    cursor: flipped ? "default" : "pointer", textAlign: "center",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    transition: "transform .15s", animation: flipped ? "cardFlipIn .35s ease-out" : "none",
+                  }}>
+                  {flipped ? (
+                    <>
+                      <span style={{ fontSize: "34px" }}>{card.ico}</span>
+                      <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", fontSize: "12px", margin: "6px 0 2px" }}>{card.name}</div>
+                      <div style={{ fontSize: "9px", color: "var(--txt-m)", lineHeight: 1.4 }}>{card.desc}</div>
+                      <div style={{ fontSize: "8px", color: "var(--txt-d)", marginTop: "4px" }}>
+                        {card.type === "weapon" ? "🗡️ อาวุธ" : card.type === "magic" ? "🔮 เวทย์" : "🪤 กับดัก"}
+                      </div>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: "44px", opacity: .85 }}>🂠</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: "22px", display: "flex", gap: "10px" }}>
+            {!drawReveal.flipped.every(Boolean) && (
+              <button className="tb-btn" style={{ padding: "8px 18px" }}
+                onClick={() => setDrawReveal(d => d ? { ...d, flipped: d.flipped.map(() => true) } : d)}>
+                เปิดทั้งหมด
+              </button>
+            )}
+            <button className="tb-btn primary" style={{ padding: "8px 22px" }}
+              onClick={() => { setDrawReveal(null); setDrawSeen(true); }}>
+              เก็บเข้ามือ ✓
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ DISCARD MODAL — ถือไพ่เกินลิมิต ต้องเลือกทิ้งเอง ═══ */}
+      {isMyTurn && !drawReveal && (me?.pendingDiscard > 0) && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div style={{ background: "var(--s2)", border: "1px solid rgba(224,80,80,.45)", borderRadius: "16px", padding: "22px", maxWidth: "640px", width: "100%", maxHeight: "86vh", overflowY: "auto" }}>
+            <div style={{ textAlign: "center", marginBottom: "12px" }}>
+              <div style={{ fontSize: "34px" }}>🗑️</div>
+              <h3 style={{ fontFamily: "'Cinzel',serif", color: "#e05050", margin: "4px 0" }}>ถือไพ่เกินลิมิต</h3>
+              <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: 1.6 }}>
+                ลิมิตมือ = HP ปัจจุบัน (สูงสุด 10) — เลือกทิ้งการ์ดเอง<br />
+                <span style={{ color: "#e05050", fontWeight: 700 }}>ต้องทิ้งอีก {me.pendingDiscard} ใบ</span>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(110px,1fr))", gap: "8px" }}>
+              {me.hand?.map((card, ci) => (
+                <div key={card.uid || ci}
+                  onClick={() => discardCard(card.uid)}
+                  style={{
+                    background: "var(--s3)", border: "1px solid rgba(224,80,80,.3)", borderRadius: "10px",
+                    padding: "10px", textAlign: "center", cursor: "pointer", transition: "transform .1s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.transform = "scale(1.04)"}
+                  onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                  <span style={{ fontSize: "26px" }}>{card.ico}</span>
+                  <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", fontSize: "10px", marginTop: "4px" }}>{card.name}</div>
+                  <div style={{ fontSize: "8px", color: "var(--txt-m)", margin: "2px 0", minHeight: "22px", lineHeight: 1.3 }}>{card.desc}</div>
+                  <div style={{ fontSize: "9px", color: "#e05050" }}>🗑️ ทิ้งใบนี้</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

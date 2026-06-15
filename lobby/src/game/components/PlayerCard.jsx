@@ -5,6 +5,8 @@ import { ROLES }   from "../constants/roles.js";
 export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLeave }) {
   const cls  = CLASSES[player.classId];
   const role = ROLES[player.role];
+  // บทบาทลับ: ถ้า server ซ่อนไว้ (role === "hidden") จะไม่มีใน ROLES → แสดง "ปริศนา"
+  const roleLabel = role ? `${role.ico} ${role.name}` : "❓ ปริศนา";
   return (
     <div
       className={`pcard ${isCurrentTurn ? "active" : ""} ${!player.alive ? "dead" : ""} ${isMe ? "me" : ""}`}
@@ -18,7 +20,7 @@ export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLea
         </div>
         <div>
           <div className="p-name">{player.name}{isMe ? " (คุณ)" : ""}</div>
-          <span className={`p-role tag tag-${player.role}`}>{role?.ico} {role?.name}</span>
+          <span className={`p-role tag tag-${role ? player.role : "hidden"}`}>{roleLabel}</span>
         </div>
       </div>
       {/* HP/MP bars */}
@@ -43,8 +45,19 @@ export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLea
         <div className="p-stat"><span>ATK</span><span>{player.atk}</span></div>
         <div className="p-stat"><span>DEF</span><span>{player.def}</span></div>
         <div className="p-stat"><span>SPD</span><span>{player.move}</span></div>
-        <div className="p-stat"><span>💰</span><span>{player.gold}</span></div>
+        <div className="p-stat"><span>🎯</span><span>{player.range ?? 0}</span></div>
       </div>
+      {/* Equipment */}
+      {player.equipment?.length > 0 && (
+        <div className="status-row" style={{ gap: "3px" }}>
+          {player.equipment.map((e, ei) => (
+            <span key={ei} className="status-tag" style={{ background: "rgba(201,168,76,.15)", border: "1px solid rgba(201,168,76,.3)" }}
+              title={`${e.name}${e.atk ? ` ATK+${e.atk}` : ""}${e.def ? ` DEF+${e.def}` : ""}${e.range ? ` ระยะ${e.range}` : ""}`}>
+              {e.ico}
+            </span>
+          ))}
+        </div>
+      )}
       {/* Status effects */}
       {player.statusEffects?.length > 0 && (
         <div className="status-row">

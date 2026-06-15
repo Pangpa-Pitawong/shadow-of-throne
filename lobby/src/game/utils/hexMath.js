@@ -18,12 +18,16 @@ export function hexPoints(cx, cy, size) {
 }
 
 export function hexDistance(a, b) {
-  const ac = a.col - (a.row - (a.row & 1)) / 2;
-  const ar = a.row;
-  const bc = b.col - (b.row - (b.row & 1)) / 2;
-  const br = b.row;
-  const dx = bc - ac, dy = br - ar;
-  return Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dx - dy));
+  // layout เป็น odd-q (คอลัมน์คี่เลื่อนลง ตาม hexToPixel) — แปลงเป็น cube coordinate
+  // ให้ตรงกับ neighbor dirs และระยะที่ server คำนวณ
+  const toCube = (col, row) => {
+    const x = col;
+    const z = row - (col - (col & 1)) / 2;
+    return { x, y: -x - z, z };
+  };
+  const ac = toCube(a.col, a.row);
+  const bc = toCube(b.col, b.row);
+  return (Math.abs(ac.x - bc.x) + Math.abs(ac.y - bc.y) + Math.abs(ac.z - bc.z)) / 2;
 }
 
 export function getNeighbors(col, row, cells) {

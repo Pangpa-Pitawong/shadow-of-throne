@@ -18,4 +18,11 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // server.js รันบน Node — ใช้ global ของ Node (process, ฯลฯ)
+    files: ['server.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ])
