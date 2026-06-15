@@ -2,7 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // GitHub Pages เสิร์ฟที่ https://<user>.github.io/sot-server/ → base ต้องเป็น /sot-server/
+  // ตอน dev (vite --host) ใช้ '/' ปกติ
+  base: command === 'build' ? '/sot-server/' : '/',
   plugins: [react()],
   server: {
     host: true,
@@ -16,4 +19,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

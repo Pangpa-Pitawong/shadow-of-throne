@@ -1197,3 +1197,17 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Features:  move=3, hand=HP-limit, dodge-dice, equipment-range, 8-phase, boss-mode, hidden-roles, fog, side-quests`);
   console.log(`   Health:    http://localhost:${PORT}/health\n`);
 });
+
+// ─── Keep-alive (กัน Render free tier หลับหลังไม่มีคนใช้ ~15 นาที) ───────────────
+// Render ตั้ง RENDER_EXTERNAL_URL ให้อัตโนมัติ → self-ping /health ทุก 10 นาที
+// ถือเป็น inbound traffic ทำให้ instance ไม่ spin down (เลี่ยง cold start ~12 วิ)
+const SELF_URL = process.env.RENDER_EXTERNAL_URL;
+if (SELF_URL) {
+  const pingUrl = `${SELF_URL.replace(/\/$/, "")}/health`;
+  setInterval(() => {
+    fetch(pingUrl)
+      .then((r) => console.log(`[keep-alive] ${r.status} ${pingUrl}`))
+      .catch((e) => console.warn(`[keep-alive] failed: ${e.message}`));
+  }, 10 * 60 * 1000);
+  console.log(`   Keep-alive: self-ping ${pingUrl} ทุก 10 นาที`);
+}
