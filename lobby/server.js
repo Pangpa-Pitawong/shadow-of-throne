@@ -81,15 +81,20 @@ function uniqueName(room, desired) {
   return `${base} (${n})`;
 }
 
-// ─── REDACT ROOM: ปกปิดบทบาทลับใน room_update ─────────────────────────────────
-//   บทบาทเป็นความลับ (เกมสืบบทบาท) — ผู้เล่นเห็นได้แค่ "ของตัวเอง" + "พระราชา"
-//   (พระราชาเปิดเผยตั้งแต่ต้น) ที่เหลือถูกแทนด้วย "hidden" ก่อนส่งออก
+// ─── REDACT ROOM: ปกปิดข้อมูลลับใน room_update ─────────────────────────────────
+//   • บทบาทเป็นความลับ (เกมสืบบทบาท) — เห็นได้แค่ "ของตัวเอง" + "พระราชา" (เปิดเผยอยู่แล้ว)
+//   • ตัด gameState ออกเสมอ — ส่งแยกผ่าน game_state (ที่ redact รายผู้เล่น) เพื่อกัน
+//     ข้อมูลลับ (มือไพ่/บทบาท/เควส) รั่ว และลดขนาด payload ของ room_update
 function redactRoomFor(room, viewerIdx) {
-  if (!room?.roles) return room;
-  const roles = room.roles.map((r, i) =>
-    (i === viewerIdx || r === "king") ? r : "hidden"
-  );
-  return { ...room, roles };
+  if (!room) return room;
+  const clone = { ...room };
+  delete clone.gameState;
+  if (room.roles) {
+    clone.roles = room.roles.map((r, i) =>
+      (i === viewerIdx || r === "king") ? r : "hidden"
+    );
+  }
+  return clone;
 }
 
 const rnd = (n) => Math.floor(Math.random() * n) + 1; // ลูกเต๋า d-n (1..n)
@@ -2170,8 +2175,13 @@ function handleLeave(ws) {
   const room = rooms[code];
   if (!room) return;
 
+  // ── เกมเริ่มแล้ว → คงสล็อตผู้เล่นไว้ (รวมถึง host) ──────────────────────────
+  //   เพื่อให้ "กลับเข้าห้องเดิม" (rejoin) ตอนรีเฟรช/เน็ตหลุดได้ — ไม่ลบ ไม่ปิดห้อง
+  //   (ถ้าไม่กลับมาเลย ห้องจะถูกเก็บกวาดเองตอน cleanup 30 นาที)
+  if (room.gameState) { broadcastRoomList(); return; }
+
   if (playerIdx === 0) {
-    console.log(`[${code}] Host left → closing room`);
+    console.log(`[${code}] Host left lobby → closing room`);
     for (const [cws, cinfo] of clients) {
       if (cinfo.code === code) {
         send(cws, { type: "room_closed", reason: "host_left" });
@@ -2180,13 +2190,11 @@ function handleLeave(ws) {
     }
     delete rooms[code];
   } else {
-    if (!room.gameState) {
-      room.players = room.players.filter((_, i) => i !== playerIdx).map((p, i) => ({ ...p, idx: i }));
-      for (const [, cinfo] of clients) {
-        if (cinfo.code === code && cinfo.playerIdx > playerIdx) cinfo.playerIdx -= 1;
-      }
-      broadcast(code);
+    room.players = room.players.filter((_, i) => i !== playerIdx).map((p, i) => ({ ...p, idx: i }));
+    for (const [, cinfo] of clients) {
+      if (cinfo.code === code && cinfo.playerIdx > playerIdx) cinfo.playerIdx -= 1;
     }
+    broadcast(code);
   }
   broadcastRoomList();
 }
@@ -2268,6 +2276,31 @@ wss.on("connection", (ws) => {
       broadcast(code);
       console.log(`[${code}] "${playerName}" joined (${idx})`);
       broadcastRoomList();
+    }
+
+    // ── REJOIN: กลับเข้าห้องเดิมหลังรีเฟรช/เน็ตหลุด (อิงชื่อ + รหัสห้องจาก localStorage) ──
+    //   • ถ้ายังมีสล็อตชื่อนี้อยู่ → ผูก connection นี้กลับเข้าสล็อตเดิม (ได้ทั้งกลางเกม)
+    //   • ถ้าหลุดไปแล้วและห้องยังอยู่ในล็อบบี้ → เพิ่มกลับเข้าห้อง
+    //   • ถ้าห้องหาย/เกมเริ่มแล้วแต่ไม่มีสล็อต → rejoin_failed (client ล้าง session กลับหน้าแรก)
+    if (msg.type === "rejoin_room") {
+      const { code, playerName } = msg;
+      const room = rooms[code];
+      if (!room) return send(ws, { type: "rejoin_failed", reason: "no_room" });
+      let idx = room.players.findIndex(p => p.name === playerName);
+      if (idx < 0) {
+        if (room.status === "started" || room.gameState)
+          return send(ws, { type: "rejoin_failed", reason: "game_started" });
+        if (room.players.length >= room.maxPlayers)
+          return send(ws, { type: "rejoin_failed", reason: "full" });
+        idx = room.players.length;
+        room.players.push({ name: uniqueName(room, playerName), class: "", idx, ready: false, host: false });
+      }
+      clients.set(ws, { code, playerIdx: idx });
+      send(ws, { type: "joined", playerIdx: idx, room: redactRoomFor(room, idx), rejoined: true });
+      if (room.gameState) send(ws, { type: "game_state", gameState: redactGameStateFor(room.gameState, idx) });
+      broadcast(code);
+      broadcastRoomList();
+      console.log(`[${code}] "${playerName}" rejoined (${idx})`);
     }
 
     if (msg.type === "pick_class" || msg.type === "pick_character") {

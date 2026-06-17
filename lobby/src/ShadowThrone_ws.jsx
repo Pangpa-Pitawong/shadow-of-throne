@@ -6,6 +6,18 @@ import { ROLES } from "./game/constants/roles";
 import { CHARACTERS } from "./game/constants/characters";
 import CharIcon from "./game/components/CharIcon.jsx";
 
+// ─── SESSION: จำห้อง+ชื่อ เพื่อ "กลับเข้าห้องเดิม" อัตโนมัติตอนรีเฟรช/เน็ตหลุด ──
+const SESSION_KEY = "sot_session";
+const saveSession = (code, name) => {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ code, name })); } catch { /* ignore */ }
+};
+const clearSession = () => {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+};
+const loadSession = () => {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch { return null; }
+};
+
 // ─── MAP CONFIG helpers ──────────────────────────────────────────────────────
 const TERRAIN_LABELS = {
   forest: "🌲 ป่า", mountain: "⛰️ ภูเขา", desert: "🏜️ ทะเลทราย",
@@ -163,7 +175,11 @@ export default function ShadowThrone() {
         retryDelay = 2000;          // reset delay เมื่อเชื่อมต่อสำเร็จ
         attempts = 0;
 
-        if (screenRef.current === "gameboard") {
+        // กลับเข้าห้องเดิมอัตโนมัติ (รีเฟรช/เน็ตหลุดแล้วต่อใหม่) — ผูก connection กลับสล็อตเดิม
+        const sess = loadSession();
+        if (sess?.code && sess?.name) {
+          wsSend({ type: "rejoin_room", code: sess.code, playerName: sess.name });
+        } else if (screenRef.current === "gameboard") {
           wsSend({ type: "request_game_state" });
         }
       };
@@ -176,23 +192,53 @@ export default function ShadowThrone() {
         switch (msg.type) {
           // ── Server assigned us a slot ──────────────────────────────────
           case "joined": {
-            setRoom(msg.room);
+            const r = msg.room;
+            setRoom(r);
             setLoading(false);
             // ✅ รับ "ชื่อจริง" ที่ server กำหนด (อาจถูกเติม (2)/(3) กันซ้ำ) มาเป็นตัวตนของเรา
             //    ตัวตนทั้งหมด (บทบาท/ตัวละคร/เทิร์น) หาจากชื่อ — ต้องตรงกับฝั่ง server
-            const meJoined = msg.room.players?.[msg.playerIdx];
-            if (meJoined?.name) { setMyName(meJoined.name); myNameRef.current = meJoined.name; }
-            goScreen("lobby"); // ✅ ใช้ goScreen แทน setScreen
-            showToast(msg.playerIdx === 0
-              ? "✅ สร้างห้องสำเร็จ! รหัส: " + msg.room.code
-              : "✅ เข้าห้องสำเร็จ!"
-            );
+            const meJoined = r.players?.[msg.playerIdx];
+            const myNm = meJoined?.name;
+            if (myNm) { setMyName(myNm); myNameRef.current = myNm; }
+            // จำ session ไว้ → รีเฟรช/เน็ตหลุดแล้วกลับเข้าห้องเดิมได้
+            saveSession(r.code, myNm);
+
+            if (r.status === "started") {
+              // ── REJOIN เข้าเกมที่กำลังเล่นอยู่ → พาไปหน้าที่ถูกต้องตามเฟส ──
+              if (r.roles) setMyRole(r.roles[msg.playerIdx]);
+              if (meJoined?.charId) setMyClass(meJoined.charId);
+              if (r.rolesReady?.includes(myNm)) setRoleConfirmed(true);
+              if (r.charReady?.includes(myNm)) setCharConfirmed(true);
+              if (r.phase === "playing" || r.gameState) {
+                setAllRolesReady(true);
+                goScreen("gameboard"); // gameState มาทาง game_state แยก (มี safety-net ขอซ้ำถ้ายังไม่มา)
+              } else if (r.phase === "charselect") {
+                goScreen("charselect");
+              } else {
+                setFlipped(true); goScreen("roles"); // กลับมากลางเฟสเปิดบทบาท
+              }
+              showToast(msg.rejoined ? "↩️ กลับเข้าห้องเดิมแล้ว" : "✅ เข้าห้องสำเร็จ!");
+            } else {
+              goScreen("lobby");
+              showToast(msg.playerIdx === 0
+                ? "✅ สร้างห้องสำเร็จ! รหัส: " + r.code
+                : (msg.rejoined ? "↩️ กลับเข้าห้องเดิมแล้ว" : "✅ เข้าห้องสำเร็จ!")
+              );
+            }
             break;
           }
 
+          // ── กลับเข้าห้องเดิมไม่ได้ (ห้องหาย/เกมเริ่มไปแล้วไม่มีสล็อต) → ล้าง session ──
+          case "rejoin_failed":
+            clearSession();
+            setLoading(false);
+            if (!roomRef.current) goScreen("title");
+            break;
+
           // ── Lobby / room state changed ─────────────────────────────────
           case "room_update": {
-            setRoom(msg.room);
+            // server ตัด gameState ออกจาก room_update (กันข้อมูลลับรั่ว) → คงของเดิมที่ได้จาก game_state ไว้
+            setRoom(prev => ({ ...msg.room, gameState: msg.room.gameState ?? prev?.gameState }));
             if (msg.room.status === "started"
               && screenRef.current !== "roles"      // ✅ ใช้ ref แทน state
               && screenRef.current !== "charselect"
@@ -236,12 +282,14 @@ export default function ShadowThrone() {
             break;
 
           case "kicked":
+            clearSession();
             showToast("คุณถูกเตะออกจากห้อง");
             setRoom(null); setMyClass(""); setMyRole(null);
             goScreen("title"); // ✅ ใช้ goScreen
             break;
 
           case "room_closed":
+            clearSession();
             showToast("⚠ " + (msg.reason === "host_left" ? "Host ออกจากห้องแล้ว" : "ห้องถูกปิด"));
             setRoom(null); setMyClass(""); setMyRole(null);
             goScreen("title"); // ✅ ใช้ goScreen
@@ -413,6 +461,7 @@ export default function ShadowThrone() {
 
   // FIX: proper leave — notify server first so it can clean up
   const leaveRoom = () => {
+    clearSession(); // ออกเอง → ไม่ต้อง auto-rejoin อีก
     wsSend({ type: "leave_room" });
     setRoom(null);
     setMyClass("");
