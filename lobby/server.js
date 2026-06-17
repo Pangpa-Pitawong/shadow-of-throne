@@ -68,6 +68,30 @@ function send(ws, data) {
   if (ws.readyState === 1) ws.send(JSON.stringify(data));
 }
 
+// ─── ชื่อผู้เล่นต้องไม่ซ้ำกันในห้องเดียวกัน ───────────────────────────────────
+//   ตัวตนของ client ทั้งฝั่ง server (rolesReady/charReady) และฝั่ง client
+//   (หา "ตัวเอง" ด้วยชื่อ) อิงกับชื่อ — ถ้าซ้ำจะสับสนบทบาท/ตัวละคร
+//   จึงเติม " (2)", " (3)" ให้ชื่อที่ซ้ำตอนเข้าห้อง
+function uniqueName(room, desired) {
+  const base = (desired ?? "").toString().trim().slice(0, 16) || "ผู้เล่น";
+  const taken = new Set((room?.players || []).map(p => p.name));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base} (${n})`)) n++;
+  return `${base} (${n})`;
+}
+
+// ─── REDACT ROOM: ปกปิดบทบาทลับใน room_update ─────────────────────────────────
+//   บทบาทเป็นความลับ (เกมสืบบทบาท) — ผู้เล่นเห็นได้แค่ "ของตัวเอง" + "พระราชา"
+//   (พระราชาเปิดเผยตั้งแต่ต้น) ที่เหลือถูกแทนด้วย "hidden" ก่อนส่งออก
+function redactRoomFor(room, viewerIdx) {
+  if (!room?.roles) return room;
+  const roles = room.roles.map((r, i) =>
+    (i === viewerIdx || r === "king") ? r : "hidden"
+  );
+  return { ...room, roles };
+}
+
 const rnd = (n) => Math.floor(Math.random() * n) + 1; // ลูกเต๋า d-n (1..n)
 const shuffle = (arr) => {
   const a = [...arr];
@@ -153,9 +177,10 @@ function broadcastGameState(code, extra = {}) {
 function broadcast(code) {
   const room = rooms[code];
   if (!room) return;
-  const msg = JSON.stringify({ type: "room_update", room });
   for (const [ws, info] of clients) {
-    if (info.code === code && ws.readyState === 1) ws.send(msg);
+    if (info.code === code && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: "room_update", room: redactRoomFor(room, info.playerIdx) }));
+    }
   }
 }
 
@@ -2213,13 +2238,14 @@ wss.on("connection", (ws) => {
     if (msg.type === "create_room") {
       const { playerName, maxPlayers, mode, visibility = "public", mapConfig } = msg;
       const code = genCode();
+      const hostName = uniqueName(null, playerName); // trim/clamp + fallback ชื่อว่าง
       rooms[code] = {
         code, createdAt: Date.now(), status: "waiting",
         mode: mode || "standard",
         maxPlayers: Math.max(3, Math.min(8, maxPlayers || 4)),
-        visibility, hostName: playerName,
+        visibility, hostName,
         mapConfig: sanitizeMapConfig(mapConfig),
-        players: [{ name: playerName, class: "", idx: 0, ready: false, host: true }],
+        players: [{ name: hostName, class: "", idx: 0, ready: false, host: true }],
         rolesReady: [], gameState: null,
       };
       clients.set(ws, { code, playerIdx: 0 });
@@ -2235,7 +2261,8 @@ wss.on("connection", (ws) => {
       if (room.status === "started") return send(ws, { type: "error", msg: "เกมเริ่มไปแล้ว" });
       if (room.players.length >= room.maxPlayers) return send(ws, { type: "error", msg: "ห้องเต็มแล้ว" });
       const idx = room.players.length;
-      room.players.push({ name: playerName, class: "", idx, ready: false, host: false });
+      const name = uniqueName(room, playerName); // กันชื่อซ้ำในห้อง → ตัวตนไม่สับสน
+      room.players.push({ name, class: "", idx, ready: false, host: false });
       clients.set(ws, { code, playerIdx: idx });
       send(ws, { type: "joined", playerIdx: idx, room });
       broadcast(code);

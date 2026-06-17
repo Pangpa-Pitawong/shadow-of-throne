@@ -175,15 +175,20 @@ export default function ShadowThrone() {
 
         switch (msg.type) {
           // ── Server assigned us a slot ──────────────────────────────────
-          case "joined":
+          case "joined": {
             setRoom(msg.room);
             setLoading(false);
+            // ✅ รับ "ชื่อจริง" ที่ server กำหนด (อาจถูกเติม (2)/(3) กันซ้ำ) มาเป็นตัวตนของเรา
+            //    ตัวตนทั้งหมด (บทบาท/ตัวละคร/เทิร์น) หาจากชื่อ — ต้องตรงกับฝั่ง server
+            const meJoined = msg.room.players?.[msg.playerIdx];
+            if (meJoined?.name) { setMyName(meJoined.name); myNameRef.current = meJoined.name; }
             goScreen("lobby"); // ✅ ใช้ goScreen แทน setScreen
             showToast(msg.playerIdx === 0
               ? "✅ สร้างห้องสำเร็จ! รหัส: " + msg.room.code
               : "✅ เข้าห้องสำเร็จ!"
             );
             break;
+          }
 
           // ── Lobby / room state changed ─────────────────────────────────
           case "room_update": {
