@@ -1,0 +1,19 @@
+# ── Local / editor config (เครื่องส่วนตัว — ไม่ขึ้น repo) ──
+/.claude/
+.vscode/
+.idea/
+.DS_Store
+
+# ── Node ──
+node_modules/
+dist/
+
+# ── Asset-generation tooling (รันในเครื่อง ไม่ต้องขึ้น repo เกม) ──
+/blender_*.py
+/generate-*.js
+
+# ── Generated / unused art assets (เกมไม่ได้ใช้ตอน runtime — แมพเป็น canvas 2.5D) ──
+/renders/
+/lobby/public/models/
+/lobby/public/models3d/
+/lobby/public/tiles/

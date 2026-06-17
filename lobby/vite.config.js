@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
-  // GitHub Pages เสิร์ฟที่ https://<user>.github.io/sot-server/ → base ต้องเป็น /sot-server/
+  // GitHub Pages เสิร์ฟที่ https://<user>.github.io/shadow-of-throne/ → base ต้องเป็น /shadow-of-throne/
   // ตอน dev (vite --host) ใช้ '/' ปกติ
-  base: command === 'build' ? '/sot-server/' : '/',
+  base: command === 'build' ? '/shadow-of-throne/' : '/',
   plugins: [react()],
   server: {
     host: true,
