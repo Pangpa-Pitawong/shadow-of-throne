@@ -1,45 +1,40 @@
 // src/game/constants/cards.js
 // ─────────────────────────────────────────────────────────────────────────────
-// การ์ดทั้งหมด — แชร์ระหว่าง client (แสดงผล) และ server (ตรรกะจริง)
-// ทุกใบใน pool นี้ "ทำงานได้จริง" ในเอนจิน (ดู utils/cardEngine.js)
+// ชุดการ์ดใหม่ "บัลลังก์เงา" — แหล่งความจริงเดียว (client แสดงผล / server ตรรกะจริง)
+// ทุกใบใน pool นี้ "ทำงานได้จริง" ในเอนจิน (ดู utils/cardEngine.js + server.js)
 //
-//   type   : weapon | magic | trap
-//   rarity : folk | forbidden | mythic | divine  (ความหายาก → % การจั่ว)
-//   effect : คีย์เอฟเฟกต์ ที่เอนจินนำไปประมวลผล (ดูตารางด้านล่าง)
+//   type   : weapon | magic | trap            (event อยู่ใน constants/events.js แยกต่างหาก)
+//   rarity : folk | forbidden | mythic | divine   (พื้นบ้าน/หวงห้าม/ลี้ลับ/สมบัติสวรรค์)
 //
-// ── WEAPON (สวมใส่ → ค่าพลังถาวร + เอฟเฟกต์ตอนโจมตี/ตอนสวม) ──────────────────
-//    plain      : เพิ่ม atk/def/range เฉยๆ
-//    ranged     : อาวุธระยะไกล (ใช้ค่า range)
-//    backstab   : คริติคอลง่ายขึ้น (ทอย 5-6 = คริต)
-//    pierce     : เจาะเกราะ (ลดผลของ DEF ฝ่ายรับครึ่งหนึ่ง)
-//    double     : ทอย 6 → ฟันซ้ำอีกครั้ง
-//    lifesteal  : ตีโดน → ดูดเลือดครึ่งดาเมจ
-//    burn       : ตีโดน → ติดไฟ 2 เทิร์น (DOT)
-//    freeze     : ตีโดน → แช่แข็งเป้า 1 เทิร์น (ข้ามเทิร์น)
-//    poison_hit : ตีโดน → ติดพิษ 2 เทิร์น (DOT)
-//    stun       : ตีโดน → ล็อกเป้า 1 เทิร์น (เดินไม่ได้)
-//    aoe        : ตีโดน → กระเด็นโดนศัตรูข้างเคียง (ครึ่งดาเมจ)
-//    reflect    : (เกราะ) ผู้โจมตีเสีย HP 1 ทุกครั้งที่ตีเรา
-//    evade      : (เกราะ) เพิ่มโบนัสหลบ +2 (แก้ทางอาวุธแรง/ธนู)
-//    anticrit   : (เกราะ) ลบโอกาสโดนคริติคอลของศัตรู
-//    swift      : เพิ่มระยะเดิน +1
-//    king_only  : ราชาถือ → ATK เพิ่มอีก +2
-//    self_dmg   : ตอนสวมเสีย HP 1   |  blood : เสีย HP 2  |  def_heal : ฟื้น HP 1
+// ── WEAPON / ARMOR (สวมใส่ → ค่าพลังถาวร + เอฟเฟกต์) ─────────────────────────
+//   slot     : weapon | armor | shield | helm | boots | gloves | accessory
+//   atk/def/range/magicAtk : ค่าพลังถาวรเมื่อสวม
+//   atkElement : ธาตุของการโจมตีปกติเมื่อถืออาวุธนี้ (physical default)
+//   resist   : { <element>: flatReduce }   ลดดาเมจธาตุนั้น N หน่วย
+//   immune   : [<element>...]              ภูมิคุ้มกันดาเมจธาตุนั้น 100%
+//   immuneStatus : [<status>...]           ภูมิคุ้มกันสถานะนั้น
+//   effect   : คีย์เอฟเฟกต์พิเศษ (เอนจินประมวลผล — ดูตารางใน cardEngine/server)
+//   val      : ค่าประกอบ effect
+//   cooldown : ใช้แล้วพักกี่เทิร์น
+//   twin     : true → ต้องสวม 2 ใบจึงทำงานเต็ม
+//   tag      : ["set:dead_king"] ฯลฯ — ใช้กับเงื่อนไข/เซ็ต
+//   cond     : { time:"day"|"night", near:"water", terrain:["forest"], requireArmor:true, hpBelowPct:50 }
 //
 // ── MAGIC (ใช้มานา) — target: enemy | self | ally | team | aoe | tile | none ──
-//    dmg/heal   : ดาเมจ/ฟื้น HP
-//    effect     : สถานะที่ติดให้เป้าหมาย (ดู STATUS ด้านล่าง) + dur/val
-//    lifedrain  : ฟื้น HP ผู้ร่ายเท่าดาเมจที่ทำได้
-//    draw       : จั่วการ์ดเพิ่ม n ใบ        |  cleanse : ล้างสถานะลบของเป้าหมาย
-//    selfHp     : เสีย HP ตัวเองก่อนใช้      |  once : ใช้ได้ครั้งเดียวต่อเกม
-//    range      : ระยะเล็งเป้า (enemy/aoe)   |  teleport : ย้ายตัวเอง (target tile)
+//   dmg/heal/effect/dur/val/range/cost/element เหมือนเดิม + โหมด AOE ใหม่:
+//   aoeMode : all | randomN | line | pointRadius   (ดู cardEngine)
+//   kind    : "attack" → ถูก dodge/block ได้  |  "dodge" → การ์ดตอบโต้ (reactive)
+//   blockable / dodgeable : ระบุว่าถูกตอบโต้ด้วยอะไรได้
 //
 // ── STATUS ที่เอนจินรองรับ ────────────────────────────────────────────────
-//    ลบ : poison · burn · freeze · lock · blind · atk_down · armor_break · silence
-//    บวก: regen · shield · def_up · atk_up
+//   ลบ : poison · burn · freeze · lock · blind · atk_down · armor_break · silence
+//        · stun(มึน) · trip(สะดุด) · slow(ช้า) · curse(สาป)
+//   บวก: regen · shield · def_up · atk_up · dodge_charge(บัฟหลบ 1 ครั้ง)
 //
-// ── TRAP (วางบนช่อง → ทำงานเมื่อศัตรูเดินเข้า) ─────────────────────────────
-//    dmg · poison · lock · blind · burn · freeze · armor_break
+// ── TRAP (วางบนช่อง → ทำงานเมื่อทริกเกอร์) ─────────────────────────────────
+//   trigger : step(เหยียบ) | cardspam(เล่นการ์ด≥N) | draw(จั่ว) | equipswap | gold | always
+//   fx แบบใหม่: discard · cardlock · gold_steal · gold_loss · gold_tax · mana_drain
+//             · spell_lock · spell_reflect · move_lock · move_scramble · move_slow ฯลฯ
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── ความหายาก + น้ำหนักการจั่ว (รวม = 100 → อ่านเป็น %) ─────────────────────
@@ -51,111 +46,270 @@ export const RARITY = {
 };
 export const RARITY_ORDER = ["folk", "forbidden", "mythic", "divine"];
 
-// เผื่อ map ค่าเก่า (common/rare/secret) ให้เข้ากับระบบใหม่
-const RARITY_ALIAS = { common: "folk", rare: "forbidden", secret: "mythic", divine: "divine", uncommon: "forbidden", legendary: "divine" };
+// เผื่อ map ค่าเก่า / ชื่อไทย ให้เข้ากับระบบ
+const RARITY_ALIAS = {
+  common: "folk", rare: "forbidden", secret: "mythic", uncommon: "forbidden", legendary: "divine",
+  "พื้นบ้าน": "folk", "หวงห้าม": "forbidden", "ลี้ลับ": "mythic", "สมบัติสวรรค์": "divine",
+};
 export function normRarity(r) { return RARITY[r] ? r : (RARITY_ALIAS[r] || "folk"); }
 export function rarityMeta(r) { return RARITY[normRarity(r)]; }
 
-// สถานะ "เชิงลบ" — ใช้โดย cleanse/dispel เพื่อรู้ว่าอะไรล้างได้
+// สถานะ "เชิงลบ" — ใช้โดย cleanse/dispel/วันอภัยโทษ เพื่อรู้ว่าอะไรล้างได้
 export const NEGATIVE_STATUS = new Set([
   "poison", "burn", "freeze", "lock", "blind", "atk_down", "armor_break", "silence",
+  "stun", "trip", "slow", "curse",
 ]);
 
-// ─── อาวุธ / เกราะ ────────────────────────────────────────────────────────────
+// ธาตุที่เอนจินรองรับ (ใช้กับ resist/immune/atkElement/element)
+export const ELEMENTS = ["physical", "fire", "ice", "lightning", "water", "magic", "dark"];
+
+// ─── อาวุธ / เกราะ (30 ใบ) ────────────────────────────────────────────────────
 export const WEAPON_CARDS = [
-  // — พื้นบ้าน —
-  { id: "throwing_knife", type: "weapon", name: "มีดขว้าง",          ico: "🔪", rarity: "folk", atk: 1, range: 2, effect: "ranged",     desc: "ATK+1 · ระยะ 2" },
-  { id: "dagger",         type: "weapon", name: "มีดลอบสังหาร",       ico: "🗡️", rarity: "folk", atk: 2, range: 0, effect: "backstab",   desc: "ATK+2 · คริตง่าย (ลอบโจมตี)" },
-  { id: "battle_axe",     type: "weapon", name: "ขวานสองคม",          ico: "🪓", rarity: "folk", atk: 3, range: 0, effect: "self_dmg",   desc: "ATK+3 · สวมเสีย HP1" },
-  { id: "snake_sword",    type: "weapon", name: "ดาบพิษงูเขียว",      ico: "🐍", rarity: "folk", atk: 1, range: 0, effect: "poison_hit", desc: "ATK+1 · ตีโดนติดพิษ 2 เทิร์น" },
-  { id: "tiger_sword",    type: "weapon", name: "ดาบพยัคฆ์คำราม",     ico: "🐅", rarity: "folk", atk: 2, range: 0, effect: "plain",      desc: "ATK+2 ดาบเสือโบราณ" },
-  { id: "oak_shield",     type: "weapon", name: "โล่ไม้โอ๊คศักดิ์สิทธิ์", ico: "🛡️", rarity: "folk", def: 1, range: 0, effect: "def_heal", desc: "DEF+1 · สวมฟื้น HP+1" },
-  { id: "thorn_armor",    type: "weapon", name: "เกราะหนามเหล็ก",     ico: "🔰", rarity: "folk", def: 1, range: 0, effect: "reflect",    desc: "DEF+1 · สะท้อนผู้โจมตี HP-1" },
-  { id: "wind_armor",     type: "weapon", name: "เกราะวายุพัด",       ico: "💨", rarity: "folk", def: 2, range: 0, effect: "plain",      desc: "DEF+2 ลดความเสียหายธนู" },
-  { id: "eagle_armor",    type: "weapon", name: "เกราะขนนกอินทรี",    ico: "🪶", rarity: "folk", def: 1, range: 0, effect: "swift",      desc: "DEF+1 · ระยะเดิน +1" },
-  { id: "knight_helm",    type: "weapon", name: "หมวกเหล็กแห่งอัศวิน", ico: "⛑️", rarity: "folk", def: 1, range: 0, effect: "anticrit",   desc: "DEF+1 · กันคริติคอลจากศัตรู" },
-  { id: "sea_armor",      type: "weapon", name: "เกราะคลื่นสมุทร",    ico: "🌊", rarity: "folk", def: 2, range: 0, effect: "plain",      desc: "DEF+2 เกราะชุบน้ำ" },
-  // — หวงห้าม —
-  { id: "long_bow",       type: "weapon", name: "ธนูยาว",            ico: "🏹", rarity: "forbidden", atk: 2, range: 3, effect: "ranged",   desc: "ATK+2 · ระยะ 3" },
-  { id: "fire_spear",     type: "weapon", name: "หอกปลายเพลิง",       ico: "🔱", rarity: "forbidden", atk: 3, range: 1, effect: "burn",     desc: "ATK+3 ระยะ1 · ตีโดนเผา 2 เทิร์น" },
-  { id: "ice_bow",        type: "weapon", name: "ธนูคริสตัลน้ำแข็ง",   ico: "🎯", rarity: "forbidden", atk: 2, range: 3, effect: "freeze",   desc: "ATK+2 ระยะ3 · ตีโดนแช่แข็ง 1 เทิร์น" },
-  { id: "double_blade",   type: "weapon", name: "ดาบปีกนกฟ้า",        ico: "⚔️", rarity: "forbidden", atk: 2, range: 0, effect: "double",   desc: "ATK+2 · ทอย6 ฟันซ้ำอีกครั้ง" },
-  { id: "fireheart_sword",type: "weapon", name: "ดาบหทัยอัคคี",       ico: "❤️‍🔥", rarity: "forbidden", atk: 4, range: 0, effect: "self_dmg", desc: "ATK+4 · สวมเสีย HP1" },
-  { id: "camo_armor",     type: "weapon", name: "เกราะพรางเงา",       ico: "🥷", rarity: "forbidden", def: 1, range: 0, effect: "evade",    desc: "DEF+1 · โบนัสหลบ +2" },
-  // — ลี้ลับ —
-  { id: "blood_sword",    type: "weapon", name: "ดาบเลือดสาบาน",      ico: "💀", rarity: "mythic", atk: 6, range: 0, effect: "blood",      desc: "ATK+6 · สวมเสีย HP2" },
-  { id: "void_sword",     type: "weapon", name: "ดาบสิ้นแสงศักดิ์",   ico: "🌘", rarity: "mythic", atk: 3, range: 0, effect: "pierce",     desc: "ATK+3 · เจาะเกราะครึ่งหนึ่ง" },
-  { id: "phoenix_shield", type: "weapon", name: "โล่เพลิงมังกร",      ico: "🐉", rarity: "mythic", def: 3, range: 0, effect: "reflect",    desc: "DEF+3 · สะท้อนความร้อนผู้โจมตี" },
-  { id: "vampire_axe",    type: "weapon", name: "ขวานโลหิตทมิฬ",      ico: "🩸", rarity: "mythic", atk: 4, range: 0, effect: "lifesteal",  desc: "ATK+4 · ดูดเลือดครึ่งดาเมจ" },
-  { id: "moon_bow",       type: "weapon", name: "ธนูชะตาจันทรา",      ico: "🌙", rarity: "mythic", atk: 3, range: 4, effect: "ranged",    desc: "ATK+3 · ระยะ 4 (เล็งไกล)" },
-  { id: "dragonbone_sword",type:"weapon", name: "ดาบกระดูกมังกร",     ico: "🦴", rarity: "mythic", atk: 4, range: 0, effect: "plain",      desc: "ATK+4 ดาบกระดูกโบราณ" },
-  { id: "shadow_axe",     type: "weapon", name: "ขวานเงาเวหา",        ico: "🌑", rarity: "mythic", atk: 4, range: 0, effect: "backstab",   desc: "ATK+4 · คริตง่าย (ลอบฟันจากฟ้า)" },
-  // — สมบัติสวรรค์ —
-  { id: "sword_king",     type: "weapon", name: "ดาบแห่งกษัตริย์",    ico: "👑", rarity: "divine", atk: 2, range: 0, effect: "king_only",  desc: "ATK+2 (ราชา +4 รวม)" },
-  { id: "dragon_armor",   type: "weapon", name: "เกราะเงินมังกร",     ico: "🐲", rarity: "divine", def: 3, range: 0, effect: "plain",      desc: "DEF+3 โลหะเงินเกล็ดมังกร" },
-  { id: "war_hammer",     type: "weapon", name: "ค้อนราชันย์สังหาร",  ico: "🔨", rarity: "divine", atk: 5, range: 1, effect: "aoe",       desc: "ATK+5 ระยะ1 · สะเทือนโดนศัตรูข้างเคียง" },
-  { id: "earth_sword",    type: "weapon", name: "ดาบพสุธาแตก",        ico: "🌎", rarity: "divine", atk: 4, range: 1, effect: "aoe",       desc: "ATK+4 ระยะ1 · ความเสียหายหมู่" },
-  { id: "primordial_shield",type:"weapon",name: "โล่แห่งปฐมกาล",      ico: "🛡️", rarity: "divine", def: 5, range: 0, effect: "plain",      desc: "DEF+5 โล่ตำนานป้องกันทุกสิ่ง" },
+  // 1
+  { id: "storm_blade", type: "weapon", slot: "weapon", name: "ดาบฟ้าแลบแห่งพายุ", ico: "⚡", rarity: "forbidden",
+    atk: 3, atkElement: "lightning", effect: "vs_metal", val: 2,
+    desc: "ATK+3 (สายฟ้า) · ศัตรูใส่เกราะโลหะ ดาเมจ +2" },
+  // 2
+  { id: "black_dragon_spear", type: "weapon", slot: "weapon", name: "หอกเขี้ยวมังกรดำ", ico: "🐲", rarity: "mythic",
+    atk: 4, effect: "pierce_all", cooldown: 1,
+    desc: "ATK+4 · ทะลุเกราะทั้งหมด · ใช้แล้วพัก 1 เทิร์น" },
+  // 3
+  { id: "king_blood_axe", type: "weapon", slot: "weapon", name: "ขวานโลหิตราชัน", ico: "🪓", rarity: "folk",
+    atk: 4, effect: "rage", val: 3,
+    desc: "ATK+4 · +1 ดาเมจต่อ HP ที่เสียในรอบนี้ (สูงสุด +3)" },
+  // 4
+  { id: "sun_god_bow", type: "weapon", slot: "weapon", name: "ธนูเทพแห่งสุริยัน", ico: "🌞", rarity: "forbidden",
+    atk: 3, range: 3, atkElement: "fire", effect: "burn", cond: { time: "day" },
+    desc: "ATK+3 ระยะไกล (ไฟ) · ติดลุกไหม้ 2 เทิร์น · เฉพาะกลางวัน" },
+  // 5
+  { id: "wildcat_claw", type: "weapon", slot: "weapon", name: "มีดสั้นกรงเล็บแมวป่า", ico: "🐾", rarity: "folk",
+    atk: 2, effect: "double_hit",
+    desc: "ATK+2 · โจมตีสองครั้งติด (ครั้งที่สอง -1)" },
+  // 6
+  { id: "demon_staff", type: "weapon", slot: "weapon", name: "คทาอสูรผนึกพลัง", ico: "🔮", rarity: "mythic",
+    magicAtk: 3, effect: "magic_lifesteal", val: 1,
+    desc: "พลังเวทย์ +3 · ใช้เวทย์โจมตี ดูด HP +1" },
+  // 7
+  { id: "twin_sandstorm", type: "weapon", slot: "weapon", name: "ดาบคู่แฝดพายุทราย", ico: "⚔️", rarity: "forbidden",
+    atk: 2, twin: true, effect: "twin_blade",
+    desc: "ATK+2 ต่อใบ · ต้องสวมทั้งสองใบจึงโจมตีพร้อมกัน" },
+  // 8
+  { id: "bat_boomerang", type: "weapon", slot: "weapon", name: "โบมอิ้งปีกค้างคาว", ico: "🦇", rarity: "mythic",
+    atk: 2, range: 3, effect: "night_uncapped", cond: { time: "night" },
+    desc: "ATK+2 ระยะไกล · เฉพาะกลางคืน · ไม่มีเพดานการโจมตี" },
+  // 9
+  { id: "sea_trident", type: "weapon", slot: "weapon", name: "หอกสามแฉกของเทพสมุทร", ico: "🔱", rarity: "divine",
+    atk: 2, atkElement: "water", effect: "trident", cond: { near: "water" },
+    desc: "ATK+2 · ใกล้น้ำ โจมตี 3 เป้าพร้อมกัน (เป้าละ +1)" },
+  // 10
+  { id: "emerald_shadow_blade", type: "weapon", slot: "weapon", name: "ดาบเงาสีมรกต", ico: "🗡️", rarity: "mythic",
+    atk: 3, effect: "block_down", val: 30,
+    desc: "ATK+3 · ลดโอกาสบล็อกของศัตรู -30%" },
+  // 11
+  { id: "night_iron_armor", type: "weapon", slot: "armor", name: "เกราะเหล็กทมิฬแห่งราตรี", ico: "🛡️", rarity: "forbidden",
+    def: 3, resist: { physical: 3 }, immuneStatus: ["stun", "trip"],
+    desc: "ลดดาเมจกาย -3 · ภูมิคุ้มกัน 'มึน' และ 'สะดุด'" },
+  // 12
+  { id: "silver_dragon_hide", type: "weapon", slot: "armor", name: "เกราะหนังมังกรเงิน", ico: "🐉", rarity: "folk",
+    def: 2, resist: { physical: 2 }, effect: "swift", tag: ["no_shield"],
+    desc: "ลดดาเมจ -2 · เดิน +1 · ใช้ร่วมกับโล่ไม่ได้" },
+  // 13
+  { id: "shadow_assassin_suit", type: "weapon", slot: "armor", name: "ชุดเกราะนักฆ่าเงามืด", ico: "🥷", rarity: "mythic",
+    def: 1, resist: { physical: 1 }, effect: "enemy_miss", val: 25, cond: { terrain: ["forest", "dark", "swamp"] },
+    desc: "ลดดาเมจ -1 · ศัตรูพลาด +25% · เฉพาะในป่า/ที่มืด" },
+  // 14
+  { id: "king_heart_shield", type: "weapon", slot: "shield", name: "โล่หัวใจเหล็กกษัตริย์", ico: "🛡️", rarity: "forbidden",
+    def: 3, effect: "reflect", val: 1,
+    desc: "ป้องกัน -3 · สะท้อน +1 ดาเมจให้ผู้โจมตีทุกครั้ง" },
+  // 15
+  { id: "ancient_rune_helm", type: "weapon", slot: "helm", name: "หมวกเหล็กสลักอักษรโบราณ", ico: "⛑️", rarity: "folk",
+    resist: { magic: 2 }, effect: "magic_resist", val: 2, cond: { requireArmor: true },
+    desc: "ต้านเวทย์ +2 · ลดดาเมจเวทย์ -2 · ต้องสวมเกราะตัวอื่นด้วย" },
+  // 16
+  { id: "thunder_seal_armor", type: "weapon", slot: "armor", name: "เกราะสายฟ้าซีลไฟฟ้า", ico: "⚡", rarity: "divine",
+    immune: ["lightning"], effect: "lightning_absorb", val: 3,
+    desc: "กันสายฟ้า -100% · ทุก 2 ครั้งที่โดนสายฟ้า ปล่อยคืน +3 สายฟ้า" },
+  // 17
+  { id: "moon_mirror_shield", type: "weapon", slot: "shield", name: "โล่กระจกเงาแห่งจันทรา", ico: "🌙", rarity: "mythic",
+    effect: "spell_reflect", val: 50, cond: { time: "night" },
+    desc: "สะท้อนเวทย์ 50% กลับผู้ใช้ · เฉพาะกลางคืน" },
+  // 18
+  { id: "iron_boxer_gloves", type: "weapon", slot: "gloves", name: "ถุงมือเหล็กนักชก", ico: "🥊", rarity: "folk",
+    atk: 3, effect: "fist_stun", val: 50, tag: ["no_heavy"],
+    desc: "โจมตีมือเปล่า +3 · 50% หยุดศัตรู 1 เทิร์น · ใช้กับอาวุธหนักไม่ได้" },
+  // 19
+  { id: "golden_lotus_armor", type: "weapon", slot: "armor", name: "เกราะกลีบดอกบัวทอง", ico: "🪷", rarity: "mythic",
+    def: 2, resist: { physical: 2 }, effect: "regen_safe", val: 1,
+    desc: "ลดดาเมจ -2 · ฟื้น HP +1 ทุกเทิร์นที่ไม่โดนโจมตี" },
+  // 20
+  { id: "stone_iron_boots", type: "weapon", slot: "boots", name: "บู๊ตเหล็กพื้นหินแกร่ง", ico: "🥾", rarity: "folk",
+    resist: { fire: 2 }, immuneStatus: ["trip"], atk: 2, effect: "kick",
+    desc: "ต้านไฟ -2 · ภูมิคุ้มกัน 'สะดุด' · เพิ่มดาเมจเตะ +2" },
+  // 21
+  { id: "snow_warrior_suit", type: "weapon", slot: "armor", name: "ชุดนักรบแห่งหิมะขาว", ico: "❄️", rarity: "forbidden",
+    immune: ["ice"], effect: "snow_hide", val: 50, cond: { terrain: ["snow", "plains"] },
+    desc: "กันน้ำแข็ง -100% · ซ่อนตัวในพื้นที่หิมะ +50%" },
+  // 22
+  { id: "merchant_shadow_armor", type: "weapon", slot: "armor", name: "เกราะเงาพ่อค้าลับ", ico: "🧥", rarity: "mythic",
+    def: 1, resist: { physical: 1 }, effect: "hide_cards", val: 2,
+    desc: "ลดดาเมจ -1 · ซ่อนการ์ด 2 ใบจากสายตาผู้อื่น" },
+  // 23
+  { id: "sacred_tree_shield", type: "weapon", slot: "shield", name: "โล่ต้นไม้ศักดิ์สิทธิ์", ico: "🌳", rarity: "folk",
+    def: 2, effect: "regen", val: 1, tag: ["fragile_fire"],
+    desc: "ป้องกัน -2 · ฟื้น HP +1 ทุกเทิร์น · แตกเมื่อโดนไฟ" },
+  // 24
+  { id: "deep_whale_hide", type: "weapon", slot: "armor", name: "เกราะหนังวาฬลึก", ico: "🐋", rarity: "forbidden",
+    immune: ["water"], def: 1, effect: "whale_hide",
+    desc: "กันน้ำ -100% · หายใจใต้น้ำ (เดินบนน้ำได้) · บนบกลดดาเมจ -1" },
+  // 25
+  { id: "dual_magic_gloves", type: "weapon", slot: "gloves", name: "ถุงมือเวทย์ฝั่งขวาซ้าย", ico: "🧤", rarity: "mythic",
+    atk: 2, def: 0, effect: "dual_glove",
+    desc: "ขวา: +2 โจมตี · ซ้าย: -1 ดาเมจ · ใส่คู่: +2 โจมตี -2 ดาเมจ" },
+  // 26
+  { id: "golden_lion_shield", type: "weapon", slot: "shield", name: "โล่อกสิงห์ทอง", ico: "🦁", rarity: "forbidden",
+    def: 2, effect: "block_stun", val: 30,
+    desc: "ป้องกัน -2 · บล็อกแล้วศัตรู 30% เสียเทิร์น (สะดุ้ง)" },
+  // 27
+  { id: "storm_eagle_helm", type: "weapon", slot: "helm", name: "หมวกนกอินทรีแห่งพายุ", ico: "🦅", rarity: "folk",
+    effect: "vision", val: 2,
+    desc: "ระยะมองเห็น +2 ช่อง · ลดโอกาสโดนลอบโจมตี -50%" },
+  // 28
+  { id: "reverse_spike_armor", type: "weapon", slot: "armor", name: "เกราะสไปค์กลับหัวกลับหาง", ico: "🦔", rarity: "mythic",
+    def: 1, resist: { physical: 1 }, effect: "spike", val: 2,
+    desc: "ลดดาเมจ -1 · สะท้อน +2 ต่อผู้โจมตี · พลังลดลงหลังโดนเกิน 3 ครั้ง" },
+  // 29
+  { id: "tri_dragon_necklace", type: "weapon", slot: "accessory", name: "สร้อยคอเขี้ยวมังกรสาม", ico: "📿", rarity: "folk",
+    resist: { fire: 1, ice: 1, lightning: 1 },
+    desc: "ต้านไฟ/น้ำแข็ง/สายฟ้า -1 · ใส่ร่วมกับเกราะอื่นได้" },
+  // 30
+  { id: "dead_king_set", type: "weapon", slot: "armor", name: "ชุดรวมพลกษัตริย์ผู้ตาย", ico: "👑", rarity: "divine",
+    def: 3, atk: 2, resist: { physical: 3, fire: 3, ice: 3, lightning: 3, magic: 3 },
+    effect: "dead_king", cond: { hpBelowPct: 50 },
+    desc: "ลดดาเมจทุกชนิด -3 · โจมตี +2 · สวมได้เมื่อ HP < 50%" },
 ];
 
-// ─── เวทมนตร์ ─────────────────────────────────────────────────────────────────
+// ─── เวทมนตร์ (การ์ดโจมตีพื้นฐาน / การ์ดหลบ / โจมตีหมู่ 10 ใบ) ───────────────
 export const MAGIC_CARDS = [
-  // — โจมตีเดี่ยว —
-  { id: "hellfire",     type: "magic", name: "ไฟนรกกรีดวิญญาณ",  ico: "🔥", rarity: "forbidden", cost: 3, dmg: 6, range: 4, target: "enemy", desc: "DMG 6 เป้าเดี่ยว" },
-  { id: "ice_storm",    type: "magic", name: "หิมะนิรันดร์",     ico: "❄️", rarity: "forbidden", cost: 3, dmg: 3, range: 4, target: "enemy", effect: "freeze", dur: 1, desc: "DMG 3 + แช่แข็ง 1 เทิร์น" },
-  { id: "thunder_smite",type: "magic", name: "สายฟ้าลงทัณฑ์",    ico: "🌩️", rarity: "forbidden", cost: 4, dmg: 6, range: 5, target: "enemy", desc: "DMG 6 สายฟ้า เป้าเดี่ยว" },
-  { id: "soul_wind",    type: "magic", name: "ลมตัดวิญญาณ",      ico: "🌬️", rarity: "forbidden", cost: 2, dmg: 4, range: 4, target: "enemy", desc: "DMG 4 ลมเฉือน" },
-  { id: "soul_drain",   type: "magic", name: "เวทย์ดูดวิญญาณ",   ico: "🫧", rarity: "mythic",    cost: 3, dmg: 3, range: 3, target: "enemy", lifedrain: true, desc: "DMG 3 + ดูด HP เท่าดาเมจ" },
-  { id: "heaven_flame", type: "magic", name: "เปลวเพลิงสวรรค์",  ico: "💥", rarity: "divine",    cost: 5, dmg: 8, range: 5, target: "enemy", once: true, desc: "DMG 8 (1 ครั้ง/เกม)" },
-  // — โจมตีหมู่ (AOE) —
-  { id: "lightning",    type: "magic", name: "พายุสายฟ้าสวรรค์", ico: "⚡", rarity: "mythic",    cost: 5, dmg: 3, range: 4, target: "aoe", desc: "DMG 3 ศัตรูทุกตัวในระยะ 4" },
-  { id: "meteor",       type: "magic", name: "ไฟกัลป์กลืนภพ",    ico: "☄️", rarity: "divine",    cost: 7, dmg: 5, range: 5, target: "aoe", desc: "DMG 5 ศัตรูทุกตัว (รุนแรง)" },
-  // — ฟื้น/บัฟ —
-  { id: "holy_heal",    type: "magic", name: "แสงศักดิ์สิทธิ์",   ico: "✨", rarity: "forbidden", cost: 3, heal: 5, range: 4, target: "ally", desc: "ฟื้น HP+5 (ตน/พันธมิตร)" },
-  { id: "bell_heal",    type: "magic", name: "เสียงระฆังสวรรค์",  ico: "🔔", rarity: "folk",      cost: 2, heal: 2, range: 2, target: "team", desc: "ฟื้น HP+2 รอบตัว (ระยะ2)" },
-  { id: "amrita",       type: "magic", name: "น้ำอมฤต",          ico: "💧", rarity: "divine",    cost: 0, heal: 99, target: "self", once: true, desc: "ฟื้น HP เต็ม (1 ครั้ง/เกม)" },
-  { id: "regen",        type: "magic", name: "ฟื้นฟูอัตโนมัติ",   ico: "🌿", rarity: "folk",      cost: 2, target: "self", effect: "regen", dur: 4, val: 1, desc: "ฟื้น HP+1 ทุกเทิร์น (4 เทิร์น)" },
-  { id: "light_barrier",type: "magic", name: "ปราการแสง",        ico: "🟡", rarity: "forbidden", cost: 2, target: "self", effect: "shield", val: 1, desc: "กันดาเมจครั้งถัดไป 1 ครั้ง" },
-  { id: "team_barrier", type: "magic", name: "เวทย์บาเรียหมู่",   ico: "🔆", rarity: "mythic",    cost: 4, target: "team", range: 2, effect: "shield", val: 1, desc: "กันดาเมจ 1 ครั้ง รอบตัว (ระยะ2)" },
-  { id: "saint_bless",  type: "magic", name: "พรแห่งนักบุญ",     ico: "🕊️", rarity: "mythic",    cost: 3, target: "team", range: 2, effect: "def_up", dur: 2, val: 2, desc: "DEF+2 รอบตัว (2 เทิร์น)" },
-  { id: "blood_oath",   type: "magic", name: "คำสาบานแห่งเลือด", ico: "🔺", rarity: "folk",      cost: 1, target: "self", effect: "atk_up", dur: 2, val: 5, selfHp: 3, desc: "เสีย HP3 → ATK+5 (1 เทิร์น)" },
-  { id: "lucky_wind",   type: "magic", name: "ลมพัดโชค",         ico: "🍃", rarity: "folk",      cost: 2, target: "self", draw: 2, desc: "จั่วการ์ดเพิ่ม 2 ใบ" },
-  { id: "dispel",       type: "magic", name: "ล้างคำสาป",        ico: "🧼", rarity: "folk",      cost: 2, target: "ally", cleanse: true, desc: "ลบสถานะลบของพันธมิตร 1 ตัว" },
-  // — ควบคุม/ดีบัฟ —
-  { id: "dark_curse",   type: "magic", name: "คำสาปเงามืด",      ico: "🌑", rarity: "folk",      cost: 2, range: 4, target: "enemy", effect: "atk_down", dur: 2, val: 2, desc: "ลด ATK ศัตรู -2 (2 เทิร์น)" },
-  { id: "vines",        type: "magic", name: "เวทย์เถาวัลย์",    ico: "🌱", rarity: "folk",      cost: 2, range: 4, target: "enemy", effect: "lock", dur: 2, desc: "ล็อกการเดินศัตรู 2 เทิร์น" },
-  { id: "frost_bind",   type: "magic", name: "น้ำแข็งพันธนาการ", ico: "🧊", rarity: "forbidden", cost: 3, range: 4, target: "enemy", effect: "lock", dur: 2, desc: "ตรึงศัตรูไว้กับที่ 2 เทิร์น" },
-  { id: "silence",      type: "magic", name: "คำสาปความเงียบ",   ico: "🤫", rarity: "forbidden", cost: 3, range: 4, target: "enemy", effect: "silence", dur: 2, desc: "ห้ามศัตรูใช้เวทย์ 2 เทิร์น" },
-  { id: "time_stop",    type: "magic", name: "หยุดเวลา",         ico: "⏳", rarity: "mythic",    cost: 4, range: 4, target: "enemy", effect: "freeze", dur: 1, once: true, desc: "ศัตรูข้ามเทิร์นถัดไป" },
-  { id: "armor_curse",  type: "magic", name: "คำสาปสลายเกราะ",   ico: "🪬", rarity: "mythic",    cost: 2, range: 4, target: "enemy", effect: "armor_break", dur: 3, val: 2, desc: "ทำลายเกราะศัตรู DEF-2 (3 เทิร์น)" },
-  // — เคลื่อนที่ —
-  { id: "warp",         type: "magic", name: "วาร์ปหลบ",         ico: "🌀", rarity: "forbidden", cost: 2, target: "tile", teleport: true, desc: "เทเลพอร์ตตัวเองไปช่องที่เลือก" },
+  // — โจมตีพื้นฐาน (พบบ่อย — โควตา "20 ใบเหมือนกัน") —
+  { id: "mana_bolt", type: "magic", kind: "attack", name: "พลังเวทย์พื้นฐาน", ico: "✦", rarity: "folk",
+    cost: 1, dmg: 3, range: 4, target: "enemy", element: "magic", blockable: true, canBlockAoe: true,
+    desc: "DMG 3 เป้าเดี่ยว · ใช้บล็อกการโจมตีหมู่ได้" },
+  // — การ์ดหลบ (reactive) —
+  { id: "wind_dodge", type: "magic", kind: "dodge", name: "ลมเวทย์หลบภัย", ico: "🌬️", rarity: "folk",
+    cost: 1, target: "self", reactive: true, effect: "dodge_charge", val: 1,
+    desc: "หลบการโจมตี 1 ครั้ง + เคลื่อนที่ 1 ช่อง · ใช้ตอบโต้/บล็อกหมู่ได้" },
+
+  // — โจมตีหมู่ 10 ใบ (ไม่ซ้ำ) — kind:"attack" ถูกตอบโต้ได้ตามที่ระบุ —
+  { id: "field_sweep", type: "magic", kind: "attack", name: "คลื่นเวทย์กวาดสนาม", ico: "🌊", rarity: "forbidden",
+    cost: 4, dmg: 4, target: "aoe", aoeMode: "all", element: "magic", dodgeable: true, blockable: true,
+    desc: "โจมตีทุกคนในสนาม 4 · หลบ/บล็อกได้" },
+  { id: "meteor_shower", type: "magic", kind: "attack", name: "ฝนดาวตกเวทย์", ico: "☄️", rarity: "forbidden",
+    cost: 4, dmg: 3, target: "aoe", aoeMode: "randomN", val: 3, element: "magic", dodgeable: true,
+    desc: "โจมตีสุ่ม 3 คน คนละ 3 · หลบได้" },
+  { id: "thunder_storm_all", type: "magic", kind: "attack", name: "พายุสายฟ้าซัดทุกทิศ", ico: "🌩️", rarity: "mythic",
+    cost: 5, dmg: 2, target: "aoe", aoeMode: "all", element: "lightning", effect: "stun", dur: 1, val: 50,
+    dodgeable: true, blockable: true,
+    desc: "โจมตีทุกคน 2 สายฟ้า + 50% มึน 1 เทิร์น · หลบ/บล็อกได้" },
+  { id: "ring_of_fire", type: "magic", kind: "attack", name: "วงแหวนไฟโลก", ico: "🔥", rarity: "mythic",
+    cost: 5, dmg: 5, target: "aoe", aoeMode: "pointRadius", range: 2, element: "fire", dodgeable: true,
+    desc: "โจมตีทุกคนในระยะ 2 ช่องรอบผู้ใช้ 5 ไฟ · หลบได้" },
+  { id: "ice_spear_trio", type: "magic", kind: "attack", name: "หอกน้ำแข็งสามพุ่ง", ico: "🧊", rarity: "forbidden",
+    cost: 4, dmg: 3, target: "aoe", aoeMode: "randomN", val: 3, element: "ice", effect: "slow", dur: 1,
+    blockable: true,
+    desc: "โจมตีสุ่ม 3 คน คนละ 3 น้ำแข็ง + ช้า 1 เทิร์น · บล็อกได้" },
+  { id: "dark_night_wave", type: "magic", kind: "attack", name: "คลื่นความมืดแห่งราตรี", ico: "🌑", rarity: "mythic",
+    cost: 5, dmg: 3, target: "aoe", aoeMode: "all", element: "dark", effect: "mana_drain", val: 1,
+    dodgeable: true, blockable: true,
+    desc: "โจมตีทุกคน 3 มืด + ดูดมานาทุกคน 1 · หลบ/บล็อกได้" },
+  { id: "mana_blast_center", type: "magic", kind: "attack", name: "เสียงระเบิดเวทย์กลางสนาม", ico: "💥", rarity: "forbidden",
+    cost: 4, dmg: 4, target: "aoe", aoeMode: "pointRadius", range: 2, byTile: true, element: "magic", dodgeable: true,
+    desc: "เลือกจุด โจมตีทุกคนในรัศมี 2 ช่อง 4 · หลบได้" },
+  { id: "sand_drain_storm", type: "magic", kind: "attack", name: "พายุทรายกลืนพลัง", ico: "🌪️", rarity: "mythic",
+    cost: 5, dmg: 2, target: "aoe", aoeMode: "all", element: "magic", lifedrain: true, dodgeable: true,
+    desc: "โจมตีทุกคน 2 + ดูด HP มาฟื้นผู้ใช้ · หลบได้" },
+  { id: "cosmos_breaker", type: "magic", kind: "attack", name: "กระแสจักรวาลทลายป้อม", ico: "🌌", rarity: "divine",
+    cost: 6, dmg: 3, target: "aoe", aoeMode: "all", element: "magic", pierce: true, dodgeable: true, blockable: true,
+    desc: "โจมตีทุกคน 3 ทะลุเกราะทั้งหมด · หลบ/บล็อกได้" },
+  { id: "shadow_dragon_line", type: "magic", kind: "attack", name: "มังกรเงาพุ่งผ่านสนาม", ico: "🐉", rarity: "divine",
+    cost: 6, dmg: 5, target: "aoe", aoeMode: "line", range: 6, element: "dark", effect: "curse", dur: 2,
+    dodgeable: true,
+    desc: "กำหนดเส้นตรง โจมตีทุกคนในเส้น 5 + สาป 2 เทิร์น · หลบได้" },
 ];
 
-// ─── กับดัก ───────────────────────────────────────────────────────────────────
+// ─── กับดัก (20 ใบ) ───────────────────────────────────────────────────────────
 export const TRAP_CARDS = [
-  // — พื้นบ้าน —
-  { id: "iron_pit",    type: "trap", name: "หลุมหนามเหล็ก",  ico: "🕳️", rarity: "folk",      dmg: 3, desc: "วาง: DMG 3 ทันทีเมื่อเหยียบ" },
-  { id: "spikes",      type: "trap", name: "หนามเหล็กพุ่ง",   ico: "⚙️", rarity: "folk",      dmg: 2, armor_break: 2, desc: "วาง: DMG 2 + ทำลายเกราะ" },
-  { id: "poison_pin",  type: "trap", name: "เข็มพิษซ่อนเร้น", ico: "☠️", rarity: "folk",      poison: 3, desc: "วาง: ติดพิษ -1HP/เทิร์น 3 เทิร์น" },
-  { id: "net",         type: "trap", name: "ตาข่ายดักจับ",   ico: "🕸️", rarity: "folk",      lock: 1, desc: "วาง: ล็อกการเดิน 1 เทิร์น" },
-  { id: "smoke_bomb",  type: "trap", name: "ระเบิดควัน",     ico: "💨", rarity: "folk",      blind: 2, desc: "วาง: ตาบอด (ATK ลด) 2 เทิร์น" },
-  { id: "flash",       type: "trap", name: "ระเบิดแฟลช",     ico: "✨", rarity: "folk",      blind: 1, desc: "วาง: ตาบอด 1 เทิร์น" },
-  { id: "tripwire",    type: "trap", name: "เส้นลวดสะดุด",   ico: "➰", rarity: "folk",      lock: 1, dmg: 1, desc: "วาง: DMG1 + ล้มล็อก 1 เทิร์น" },
-  // — หวงห้าม —
-  { id: "chains",      type: "trap", name: "กับดักโซ่ตรวน",  ico: "⛓️", rarity: "forbidden", lock: 2, desc: "วาง: ล็อกการเดิน 2 เทิร์น" },
-  { id: "sleep_dust",  type: "trap", name: "ผงสะกดหลับ",     ico: "😴", rarity: "forbidden", freeze: 1, desc: "วาง: ศัตรูหลับข้ามเทิร์น" },
-  { id: "frost_floor", type: "trap", name: "น้ำเยือกแข็ง",   ico: "🧊", rarity: "forbidden", lock: 1, dmg: 1, desc: "วาง: DMG1 + ล็อก 1 เทิร์น" },
-  { id: "fire_floor",  type: "trap", name: "พื้นไฟลุก",      ico: "🔥", rarity: "forbidden", dmg: 3, burn: 2, desc: "วาง: DMG 3 + ติดไฟ 2 เทิร์น" },
-  { id: "bear_trap",   type: "trap", name: "หลุมหนามแฝง",    ico: "🪤", rarity: "forbidden", dmg: 4, desc: "วาง: DMG 4 ทันที" },
-  { id: "acid",        type: "trap", name: "น้ำกรดสาด",      ico: "🧪", rarity: "forbidden", armor_break: 3, desc: "วาง: ทำลายเกราะ DEF-3 (3 เทิร์น)" },
-  { id: "poison_arrow",type: "trap", name: "ลูกศรพิษ",       ico: "🏹", rarity: "forbidden", dmg: 2, poison: 2, desc: "วาง: DMG 2 + พิษ 2 เทิร์น" },
-  // — ลี้ลับ —
-  { id: "bomb_box",    type: "trap", name: "กล่องระเบิด",    ico: "🧨", rarity: "mythic",    dmg: 6, desc: "วาง: DMG 6 (รุนแรง)" },
-  { id: "rockslide",   type: "trap", name: "แผ่นหินถล่ม",    ico: "🪨", rarity: "mythic",    dmg: 5, lock: 1, desc: "วาง: DMG 5 + ปิดเส้นทาง 1 เทิร์น" },
+  // [ส่งผลต่อการ์ดบนมือ]
+  { id: "black_ink_trap", type: "trap", name: "กับดักหมึกสีดำ", ico: "🖤", rarity: "folk",
+    trigger: "cardspam", threshold: 3, fx: "discard", val: 2,
+    desc: "ทริก: เป้าหมายเล่นการ์ด ≥3 ใบในรอบเดียว → ทิ้งการ์ดสุ่ม 2 ใบ" },
+  { id: "cursed_cabinet", type: "trap", name: "ตู้เก็บของสาป", ico: "🗄️", rarity: "folk",
+    trigger: "step", fx: "cardlock", val: 1, dur: 2,
+    desc: "วาง: ล็อคการ์ดสุ่ม 1 ใบในมือ เล่นไม่ได้ 2 เทิร์น" },
+  { id: "mind_swap_trap", type: "trap", name: "กับดักสลับใจ", ico: "🔀", rarity: "forbidden",
+    trigger: "draw", fx: "card_swap",
+    desc: "ทริก: เมื่อศัตรูจั่ว → สลับการ์ด 1 ใบในมือศัตรูกับการ์ดบนสุดสำรับผู้วาง" },
+  { id: "ink_poison_trap", type: "trap", name: "กับดักน้ำเสียหมึกพิษ", ico: "🥃", rarity: "folk",
+    trigger: "step", fx: "discard_dot", val: 1, dur: 3,
+    desc: "วาง: ทิ้งการ์ด 1 ใบ/เทิร์น เป็นเวลา 3 เทิร์น" },
+  { id: "card_burn_trap", type: "trap", name: "กับดักไฟแผดการ์ด", ico: "🔥", rarity: "forbidden",
+    trigger: "step", fx: "burn_draw", val: 3,
+    desc: "วาง: การ์ด 3 ใบแรกที่จะจั่วเทิร์นถัดไปถูกทำลาย" },
+
+  // [ส่งผลต่ออุปกรณ์]
+  { id: "armor_acid", type: "trap", name: "กรดกัดเกราะ", ico: "🧪", rarity: "forbidden",
+    trigger: "step", fx: "armor_break", val: 2, dur: 3,
+    desc: "วาง: ลดเกราะ -2/เทิร์น เป็นเวลา 3 เทิร์น (ถึง 0 เกราะแตก)" },
+  { id: "magnet_rope", type: "trap", name: "เชือกแม่เหล็กดูดอาวุธ", ico: "🧲", rarity: "forbidden",
+    trigger: "step", fx: "disarm", dur: 1,
+    desc: "วาง: ศัตรูใส่อาวุธโลหะต้องทิ้งอาวุธสุ่ม 1 ใบ เก็บไม่ได้ 1 เทิร์น" },
+  { id: "fast_rust_trap", type: "trap", name: "กับดักสนิมเร็ว", ico: "🟫", rarity: "mythic",
+    trigger: "step", fx: "gear_silence", dur: 3,
+    desc: "วาง: เกราะศัตรูสูญเสียเอฟเฟกต์พิเศษชั่วคราว 3 เทิร์น" },
+  { id: "binding_thread", type: "trap", name: "เส้นด้ายผูกมัดสายรัด", ico: "🧵", rarity: "mythic",
+    trigger: "equipswap", fx: "slot_lock", dur: 2,
+    desc: "ทริก: เมื่อศัตรูเปลี่ยนอุปกรณ์ → ล็อคสล็อต 1 ช่อง 2 เทิร์น" },
+  { id: "reverse_wield_trap", type: "trap", name: "กับดักย้อนสวม", ico: "↩️", rarity: "mythic",
+    trigger: "step", fx: "weapon_backfire", dur: 1,
+    desc: "วาง: อาวุธศัตรูทำดาเมจตัวเอง 1 เทิร์น (ครึ่งหนึ่งของดาเมจ)" },
+
+  // [ส่งผลต่อเงิน]
+  { id: "holey_purse", type: "trap", name: "ถุงทองมีรู", ico: "💸", rarity: "folk",
+    trigger: "step", fx: "gold_loss", val: 3,
+    desc: "วาง: ศัตรูเสีย 3 เหรียญ" },
+  { id: "thief_trap", type: "trap", name: "กับดักโจรมือไว", ico: "🫳", rarity: "forbidden",
+    trigger: "gold", fx: "gold_steal_half",
+    desc: "ทริก: เมื่อศัตรูได้เหรียญ/ค้าขาย → ขโมยครึ่งหนึ่งให้ผู้วาง" },
+  { id: "shadow_tax", type: "trap", name: "ภาษีเงามืด", ico: "🏷️", rarity: "folk",
+    trigger: "always", fx: "gold_tax", val: 2, dur: 3,
+    desc: "วางประจำพื้นที่: ศัตรูจ่าย 2 เหรียญ/เทิร์นที่อยู่ในพื้นที่ (สูงสุด 3 เทิร์น)" },
+
+  // [ส่งผลต่อพลังเวทย์]
+  { id: "mana_cage", type: "trap", name: "กรงพันธนาการเวทย์", ico: "🔒", rarity: "forbidden",
+    trigger: "step", fx: "spell_lock", dur: 2,
+    desc: "วาง: ศัตรูใช้การ์ดเวทย์ไม่ได้ 2 เทิร์น" },
+  { id: "mana_siphon_trap", type: "trap", name: "กับดักดูดมนต์", ico: "🌀", rarity: "mythic",
+    trigger: "step", fx: "mana_steal", val: 2,
+    desc: "วาง: ขโมยมานา 2 ให้ผู้วาง · ถ้าไม่มีมานา เสีย HP 2" },
+  { id: "spell_loop_snare", type: "trap", name: "วงบ่วงย้อนเวทย์", ico: "♻️", rarity: "mythic",
+    trigger: "step", fx: "spell_backfire", dur: 1,
+    desc: "วาง: เวทย์ถัดไปของศัตรูย้อนโจมตีตัวเอง 50%" },
+
+  // [ส่งผลต่อการเดิน]
+  { id: "invisible_chain", type: "trap", name: "กับดักโซ่ล่องหน", ico: "⛓️", rarity: "forbidden",
+    trigger: "step", fx: "move_lock", dur: 2, val: 2,
+    desc: "วาง: ล็อคขาศัตรู เดินไม่ได้ 2 เทิร์น · ถ้าหนีเสีย HP 2" },
+  { id: "dragon_resin_floor", type: "trap", name: "พื้นหนึบเรซิ่นมังกร", ico: "🟧", rarity: "forbidden",
+    trigger: "step", fx: "move_slow", dur: 3, val: 1,
+    desc: "วาง: เคลื่อนที่เหลือ 1 ช่อง/เทิร์น เป็นเวลา 3 เทิร์น" },
+  { id: "dead_end_trap", type: "trap", name: "กับดักทางตัน", ico: "🚧", rarity: "mythic",
+    trigger: "step", fx: "no_escape", dur: 1,
+    desc: "วาง: บล็อกเส้นทางหนีของศัตรู 1 เทิร์น" },
+  { id: "mirror_maze", type: "trap", name: "กระจกลวงทิศ", ico: "🪞", rarity: "mythic",
+    trigger: "step", fx: "move_scramble", dur: 2,
+    desc: "วาง: ศัตรูเคลื่อนที่แบบสุ่มแทนทิศที่ต้องการ 2 เทิร์น" },
 ];
 
-// pool รวม (ใช้ทั้ง client/server)
+// pool รวม (ใช้ทั้ง client/server) — event แยกไป constants/events.js
 export const ALL_CARDS = [...WEAPON_CARDS, ...MAGIC_CARDS, ...TRAP_CARDS];
 export const CARD_BY_ID = Object.fromEntries(ALL_CARDS.map(c => [c.id, c]));
 

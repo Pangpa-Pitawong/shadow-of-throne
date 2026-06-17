@@ -3,7 +3,7 @@ export const TERRAIN = {
   plains:   { id: "plains",   name: "ที่ราบ",    ico: "🌿", color: "#2d5a27", dark: "#1a3a18", moveCost: 1 },
   forest:   { id: "forest",   name: "ป่า",       ico: "🌲", color: "#1a4a1a", dark: "#0d2e0d", moveCost: 2 },
   mountain: { id: "mountain", name: "ภูเขา",     ico: "⛰️", color: "#4a4040", dark: "#2e2828", moveCost: 3 },
-  water:    { id: "water",    name: "แม่น้ำ",    ico: "🌊", color: "#1a3a5a", dark: "#0d2438", moveCost: 99 },
+  water:    { id: "water",    name: "แม่น้ำ",    ico: "🌊", color: "#1a3a5a", dark: "#0d2438", moveCost: 3 },
   desert:   { id: "desert",   name: "ทะเลทราย", ico: "🏜️", color: "#6a5a30", dark: "#4a3e20", moveCost: 2 },
   swamp:    { id: "swamp",    name: "หนองน้ำ",   ico: "🌿", color: "#2a4a30", dark: "#182e1e", moveCost: 3 },
 };

@@ -3,18 +3,22 @@ import "../styles/gameboard.css";
 
 import { ROLES } from "../constants/roles.js";
 import { CLASSES } from "../constants/classes.js";
+import { CHARACTERS } from "../constants/characters.js";
 import { RARITY, normRarity } from "../constants/cards.js";
 import { TERRAIN, TERRAIN_COLORS, TERRAIN_STROKE } from "../constants/terrain.js";
 
-import { hexToPixel, hexPoints, hexDistance, getReachable } from "../utils/hexMath.js";
+import { hexToPixel, hexPoints, hexDistance, getReachable, getCostMap } from "../utils/hexMath.js";
 
 import TopBar from "./TopBar.jsx";
 import LeftPanel from "./LeftPanel.jsx";
 import RightPanel from "./RightPanel.jsx";
 import BottomBar from "./BottomBar.jsx";
+import HexMap3D from "./HexMap3D.jsx";
 import WinScreen from "./overlays/WinScreen.jsx";
 import DiceAnimation from "./overlays/DiceAnimation.jsx";
 import EventBanner from "./overlays/EventBanner.jsx";
+import EventCardModal from "./overlays/EventCardModal.jsx";
+import InterruptPrompt from "./overlays/InterruptPrompt.jsx";
 import Tooltip from "./overlays/Tooltip.jsx";
 
 // ─── CONSTANTS ───────────────────────────────────────────────
@@ -49,7 +53,7 @@ const EXTENDED_SPECIAL_ZONES = {
   farm: { name: "ไร่นา", ico: "🌾", effect: "farm", desc: "ยืนที่นี่ทุกเทิร์น: ทอง+1", color: "#80c040", category: "resource" },
   river: { name: "แม่น้ำศักดิ์สิทธิ์", ico: "🌊", effect: "mana_well", desc: "ฟื้นมานา+3 ทั้งหมด", color: "#4080c0", category: "magic" },
   ruins: { name: "ซากปรักหักพัง", ico: "🏚️", effect: "ruins", desc: "ค้นหาสมบัติเก่า — เสี่ยงกับดัก", color: "#806040", category: "loot" },
-  watchtower: { name: "หอสังเกตการณ์", ico: "🔭", effect: "spy", desc: "เปิดเผยบทบาทผู้เล่น 1 คน", color: "#60a0c0", category: "intel" },
+  watchtower: { name: "หอสังเกตการณ์", ico: "🔭", effect: "spy", desc: "ล่วงรู้บทบาทผู้เล่น 1 คน (เฉพาะคุณเห็น)", color: "#60a0c0", category: "intel" },
   graveyard: { name: "สุสาน", ico: "🪦", effect: "graveyard", desc: "ได้การ์ดจากผู้ตาย / HP-1", color: "#607060", category: "dark" },
   volcano: { name: "ภูเขาไฟ", ico: "🌋", effect: "volcano", desc: "⚠️ อันตรายสูง! DMG-4 / ATK+3 1 เทิร์น", color: "#e04020", category: "danger" },
   portal: { name: "ประตูมิติ", ico: "🌀", effect: "teleport", desc: "เทเลพอร์ตไปสถานที่สุ่ม", color: "#4060e0", category: "special" },
@@ -75,9 +79,9 @@ const CATEGORY_COLORS = {
 };
 
 // ─── PLAYER ICONS สำหรับแต่ละผู้เล่น ────────────────────────
-const PLAYER_ICONS = ["👑", "⚔️", "🔮", "🏹", "🗡️", "✨"];
-const PLAYER_COLORS = ["#c9a84c", "#c94040", "#8c4cc9", "#4cc94c", "#e08040", "#40c0c0"];
-const PLAYER_LABELS = ["P1", "P2", "P3", "P4", "P5", "P6"];
+const PLAYER_ICONS = ["👑", "⚔️", "🔮", "🏹", "🗡️", "✨", "🛡️", "🔥"];
+const PLAYER_COLORS = ["#c9a84c", "#c94040", "#8c4cc9", "#4cc94c", "#e08040", "#40c0c0", "#8b7355", "#e05030"];
+const PLAYER_LABELS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"];
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
 export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, onGameAction }) {
@@ -109,13 +113,15 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [bossMode, setBossMode] = useState(false);
   const [bossLevel, setBossLevel] = useState(0);
   const [phaseStep, setPhaseStep] = useState(0);
-  const [actionsDone, setActionsDone] = useState({ moved: false, attacked: false, cardsPlayed: 0 });
+  const [actionsDone, setActionsDone] = useState({ moved: false, moveLeft: 5, attacked: false, cardsPlayed: 0 });
   const [actionMode, setActionMode] = useState(null);
   const [selectedCard, setSelectedCard] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
+  const [pendingMove, setPendingMove] = useState(null); // ช่องที่รอยืนยันการเดิน
   const [reachableCells, setReachableCells] = useState([]);
   const [attackableCells, setAttackableCells] = useState([]);
   const [trapCells, setTrapCells] = useState([]);
+  const [skillTargetCells, setSkillTargetCells] = useState([]);
 
   // ── LOG (ด้านขวา) ──
   const [log, setLog] = useState([
@@ -128,14 +134,18 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [activeEvent, setActiveEvent] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [showRules, setShowRules] = useState(false);
+  const [ruleTab, setRuleTab] = useState(0); // หมวดกฎที่กำลังเปิดอ่าน
   const [showLegend, setShowLegend] = useState(false);
   const [showShop, setShowShop] = useState(null); // { cell, items }
   const [showStatus, setShowStatus] = useState(false); // ช่องดูสถานะผู้เล่นทุกคน
+  const [statusSel, setStatusSel] = useState(null);     // index ผู้เล่นที่เลือกดูข้อมูลตัวละครในหมวดสถานะ
   const [showQuest, setShowQuest] = useState(false);   // อ่านเควสรองของตัวเองซ้ำ (ลับเฉพาะตัว)
   const [turnAnnounce, setTurnAnnounce] = useState(null);
   const [drawReveal, setDrawReveal] = useState(null); // { cards, flipped[] } — เปิดไพ่ที่จั่วได้
   const [drawSeen, setDrawSeen] = useState(false);     // เปิดไพ่ของเทิร์นนี้ดูแล้วหรือยัง
   const lastDrawKeyRef = useRef("");
+  const [eventModal, setEventModal] = useState(null);  // การ์ดเหตุการณ์ท้ายเฟส (modal กลางจอ)
+  const lastEventIdRef = useRef(0);
 
   useEffect(() => {
     if (!serverGameState) return;
@@ -159,6 +169,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     setActionsDone(
       serverGameState.actionsDone ?? {
         moved: false,
+        moveLeft: 5,
         attacked: false,
         cardsPlayed: 0,
       }
@@ -168,6 +179,13 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
     // อัปเดต ref พร้อมกัน ไม่ใช่ใน useEffect แยก
     currentTurnRef.current = serverGameState.currentTurn ?? 0;
+
+    // การ์ดเหตุการณ์ท้ายเฟส — เด้ง modal เมื่อมี reveal ใหม่
+    const er = serverGameState.eventReveal;
+    if (er && er.id && er.id !== lastEventIdRef.current) {
+      lastEventIdRef.current = er.id;
+      setEventModal(er);
+    }
 
   }, [serverGameState]);
 
@@ -224,6 +242,15 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     [currentTurn, myIdx]
   );
 
+  // ── ต้นทุนเดินจากตำแหน่งผู้เล่นปัจจุบันไปทุกช่อง (ใช้โชว์ตอนเอาเมาส์ชี้) ──
+  const moveCostMap = useMemo(() => {
+    const cp = players[currentTurn];
+    if (!cp) return null;
+    const startCell = cells.find(c => c.col === cp.col && c.row === cp.row);
+    if (!startCell) return null;
+    return getCostMap(startCell, cells, TERRAIN);
+  }, [players, currentTurn, cells]);
+
   // ── จั่วเริ่มเทิร์น: เปิดไพ่ที่เพิ่งจั่วได้ (อนิเมชันลุ้น) ──
   useEffect(() => {
     if (!isMyTurn || !me?.justDrew?.length) return;
@@ -249,7 +276,9 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   }, [onGameAction]);
 
   useEffect(() => {
-    if (actionMode === "move" && !actionsDone.moved) {
+    // ใช้ "งบเดินที่เหลือ" (moveLeft) แทนค่าเดินเต็ม — เดินเป็นช่วงๆ ได้จนงบหมด
+    const moveLeft = actionsDone.moveLeft ?? 0;
+    if (actionMode === "move" && moveLeft > 0) {
       const cp = players[currentTurn];
       if (!cp) return;
 
@@ -258,15 +287,16 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
       );
 
       if (startCell) {
-        const reachable = getReachable(startCell, cp.move, cells, TERRAIN);
+        const reachable = getReachable(startCell, moveLeft, cells, TERRAIN);
         setReachableCells(reachable);
       }
     } else {
       setReachableCells([]);
+      setPendingMove(null); // ออกจากโหมดเดิน / งบหมด → ล้างช่องที่รอยืนยัน
     }
   }, [
     actionMode,
-    actionsDone.moved,
+    actionsDone.moveLeft,
     cells,
     players,
     currentTurn
@@ -301,6 +331,20 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
       setTrapCells([]);
     }
   }, [actionMode, selectedCard, cells, players, currentTurn]);
+
+  // ── SKILL TARGET CELLS — ไฮไลต์เซลล์ที่มีผู้เล่นเป็นเป้าหมายสกิลได้ ──
+  useEffect(() => {
+    if ((actionMode === "skill" || actionMode === "king_skill") && isMyTurn) {
+      const cp = players[currentTurn];
+      if (!cp) { setSkillTargetCells([]); return; }
+      const targetCells = cells.filter(c =>
+        players.some(p => p.alive && p.id !== cp.id && p.col === c.col && p.row === c.row)
+      );
+      setSkillTargetCells(targetCells);
+    } else {
+      setSkillTargetCells([]);
+    }
+  }, [actionMode, isMyTurn, cells, players, currentTurn]);
 
   // ── เปิดร้านค้าอัตโนมัติเมื่อเดินไปถึง (อ่าน shopItems จาก server state) ──
   const lastCellKeyRef = useRef(null);
@@ -340,12 +384,10 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     if (actionMode === "move") {
       if (!reachableCells.some(c => c.key === cell.key)) return;
 
-      onGameAction("move", {
-        col: cell.col,
-        row: cell.row,
-      });
-
-      setActionMode(null);
+      // ✅ ขอยืนยันก่อนเดินจริง — ไม่ส่ง action ทันที
+      setPendingMove(cell);
+      setSelectedCell(cell);
+      return;
     }
 
     // ── ATTACK ─────────────────────────────
@@ -386,6 +428,24 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
       setActionMode(null);
     }
 
+    // ── USE ACTIVE SKILL (target-required) ─────────────────────────────────
+    else if (actionMode === "skill") {
+      const cp = players[currentTurn];
+      const target = players.find(p => p.alive && p.col === cell.col && p.row === cell.row && p.id !== cp?.id);
+      if (!target) return;
+      onGameAction("use_skill", { targetId: target.id, targetCol: cell.col, targetRow: cell.row });
+      setActionMode(null);
+    }
+
+    // ── USE KING SKILL (target-required) ───────────────────────────────────
+    else if (actionMode === "king_skill") {
+      const cp = players[currentTurn];
+      const target = players.find(p => p.alive && p.col === cell.col && p.row === cell.row && p.id !== cp?.id);
+      if (!target) return;
+      onGameAction("use_king_skill", { targetId: target.id });
+      setActionMode(null);
+    }
+
     // ── PLACE TRAP ─────────────────────────
     else if (actionMode === "trap" && selectedCard) {
       // วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง (ไฮไลต์ไว้แล้ว)
@@ -405,6 +465,19 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
   }, [actionMode, myIdx, currentTurn, players, reachableCells, trapCells, selectedCard, onGameAction]);
 
+
+  // ─── ยืนยัน / ยกเลิก การเดิน ───
+  const confirmMove = useCallback(() => {
+    if (!pendingMove) return;
+    onGameAction("move", { col: pendingMove.col, row: pendingMove.row });
+    setPendingMove(null);
+    // คงโหมด "เดิน" ไว้ — ถ้ายังเหลืองบเดิน จะเลือกเดินต่อได้ทันที (server จะส่ง moveLeft ใหม่)
+  }, [pendingMove, onGameAction]);
+
+  const cancelMove = useCallback(() => {
+    setPendingMove(null);
+    setSelectedCell(null);
+  }, []);
 
   // ─── END TURN (แก้ไขระบบส่งต่อตาและซิงค์แอกชันให้ถูกต้อง) ───
   const endTurn = useCallback(() => {
@@ -459,7 +532,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           currentPlayer={currentPlayer} isMyTurn={isMyTurn}
           onEndTurn={endTurn} onCenter={centerMap}
           onToggleRules={() => setShowRules(r => !r)}
-          onToggleStatus={() => setShowStatus(s => !s)}
+          onToggleStatus={() => setShowStatus(s => { if (!s) setStatusSel(myIdx >= 0 ? myIdx : 0); return !s; })}
           onToggleQuest={() => setShowQuest(s => !s)}
           hasQuest={!!me?.quest}
           onLeave={onLeave}
@@ -471,118 +544,102 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
         {/* RIGHT PANEL — Log (ด้านขวา) */}
         <RightPanel log={log} />
 
-        {/* MAP AREA */}
-        <div
-          className="map-area" ref={mapAreaRef}
-          onMouseDown={handleMapMouseDown}
-          onMouseMove={handleMapMouseMove}
-          onMouseUp={handleMapMouseUp}
-          onMouseLeave={handleMapMouseUp}
-        >
-          <svg
-            className="hex-map-svg"
-            width={MAP_W} height={MAP_H}
-            style={{
-              position: "absolute", top: 0, left: 0,
-              transform: `translate(${mapOffset.x}px,${mapOffset.y}px) scale(${zoom})`,
-              transformOrigin: "0 0", overflow: "visible",
-            }}
-          >
-            {/* ── Hex Cells ── */}
-            {cells.map(cell => {
-              const { x, y } = hexToPixel(cell.col, cell.row, HEX_SIZE);
-              const isReachable = reachableCells.some(c => c.key === cell.key);
-              const isAttackable = attackableCells.some(c => c.key === cell.key);
-              const isTrapTarget = trapCells.some(c => c.key === cell.key);
-              const isSelected = selectedCell?.key === cell.key;
-              const hasEnemy = players.some(p => p.alive && p.col === cell.col && p.row === cell.row && p.id !== currentTurn);
+        {/* ── SKILL MODE BANNER — แสดงเมื่ออยู่ใน skill targeting mode ── */}
+        {(actionMode === "skill" || actionMode === "king_skill") && isMyTurn && (
+          <div style={{
+            position: "absolute", top: "52px", left: "50%", transform: "translateX(-50%)",
+            zIndex: 200, background: "rgba(140,76,201,.92)", border: "1px solid #a060e0",
+            borderRadius: "8px", padding: "6px 16px", display: "flex", alignItems: "center", gap: "12px",
+            fontFamily: "'Cinzel',serif", fontSize: "12px", color: "#fff", backdropFilter: "blur(4px)",
+          }}>
+            <span>
+              {actionMode === "king_skill" ? "👑 สกิลราชา:" : "✨ สกิล:"}
+              {" "}กดที่ผู้เล่น (🟣) เพื่อเลือกเป้าหมาย
+            </span>
+            <button
+              onClick={() => setActionMode(null)}
+              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.4)", borderRadius: "4px", padding: "2px 10px", color: "#fff", cursor: "pointer", fontSize: "11px" }}>
+              ✕ ยกเลิก
+            </button>
+          </div>
+        )}
+
+        {/* MAP AREA — 2.5D Perspective Hex */}
+        <div className="map-area" ref={mapAreaRef}>
+          <HexMap3D
+            cells={cells}
+            players={players}
+            myIdx={myIdx}
+            currentTurn={currentTurn}
+            reachableCells={reachableCells}
+            attackableCells={attackableCells}
+            trapCells={trapCells}
+            skillTargetCells={skillTargetCells}
+            selectedCell={selectedCell}
+            pendingMove={pendingMove}
+            zones={EXTENDED_SPECIAL_ZONES}
+            categoryColors={CATEGORY_COLORS}
+            onCellClick={handleCellClick}
+            onCellHover={(cell, cx, cy) => {
               const zoneData = EXTENDED_SPECIAL_ZONES[cell.specialZone];
               const terrain = TERRAIN[cell.terrain] || TERRAIN.plains;
-              const fill = TERRAIN_COLORS[cell.terrain] || "#2d5a27";
-              const stroke = TERRAIN_STROKE[cell.terrain] || "#3a7a35";
-              const cat = zoneData?.category;
-              const catColor = cat ? CATEGORY_COLORS[cat] : null;
+              // ── ต้นทุนเดินมาช่องนี้ (กี่งบเดิน) จากตำแหน่งผู้เล่นรอบปัจจุบัน ──
+              const cp = players[currentTurn];
+              const isHere = cp && cp.col === cell.col && cp.row === cell.row;
+              const cost = moveCostMap?.get(cell.key);
+              const moveLeft = actionsDone.moveLeft ?? 0;
+              let move = null;
+              if (isHere) {
+                move = { text: "คุณอยู่ที่นี่", color: "#c9a84c" };
+              } else if (cost != null) {
+                const within = isMyTurn && cost <= moveLeft;
+                move = {
+                  text: `ต้องใช้ ${cost} งบเดิน` + (isMyTurn ? (within ? ` · เหลือ ${moveLeft} ✓` : ` · เกินงบ (เหลือ ${moveLeft})`) : ""),
+                  color: !isMyTurn ? "#9aa" : within ? "#7CFC7C" : "#e08080",
+                };
+              }
+              setTooltip({
+                x: cx + 12, y: cy + 12,
+                title: zoneData?.name || terrain.name,
+                desc: zoneData?.desc || `ภูมิประเทศ: ${terrain.name} (ต้นทุน ${terrain.moveCost}/ช่อง)`,
+                move,
+              });
+            }}
+            onCellLeave={() => setTooltip(null)}
+          />
 
-              return (
-                <g
-                  key={cell.key}
-                  className={`hex-cell${isReachable ? " hex-reachable" : ""}${isAttackable ? " hex-attackable" : ""}${isSelected ? " hex-selected" : ""}`}
-                  onClick={() => handleCellClick(cell)}
-                  onMouseEnter={e => {
-                    if (zoneData || cell.terrain !== "plains")
-                      setTooltip({ x: e.clientX + 12, y: e.clientY + 12, title: zoneData?.name || terrain.name, desc: zoneData?.desc || `ต้นทุนเดิน: ${terrain.moveCost}` });
+          {/* ── ยืนยันการเดิน ── */}
+          {pendingMove && (
+            <div style={{
+              position: "absolute", bottom: 64, left: "50%", transform: "translateX(-50%)",
+              background: "rgba(13,11,8,.95)", border: "1.5px solid #4cc94c",
+              borderRadius: "12px", padding: "12px 16px", zIndex: 30,
+              boxShadow: "0 8px 28px rgba(0,0,0,.6), 0 0 18px rgba(76,201,76,.25)",
+              textAlign: "center", minWidth: "220px",
+            }}>
+              <div style={{ fontSize: "12px", color: "#7CFC7C", fontFamily: "'Cinzel',serif", marginBottom: "8px" }}>
+                📍 เดินไปช่อง ({pendingMove.col}, {pendingMove.row}) ?
+              </div>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+                <button
+                  onClick={confirmMove}
+                  style={{
+                    background: "rgba(76,201,76,.25)", border: "1px solid #4cc94c",
+                    color: "#7CFC7C", borderRadius: "8px", padding: "6px 16px",
+                    fontSize: "12px", cursor: "pointer", fontWeight: 600,
                   }}
-                  onMouseLeave={() => setTooltip(null)}
-                >
-                  {/* พื้นฐาน terrain */}
-                  <polygon className="hex-bg" points={hexPoints(x, y, HEX_SIZE - 2)} fill={fill} stroke={stroke} strokeWidth="1" />
-                  {/* สีเน้นสถานที่พิเศษ */}
-                  {catColor && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill={catColor.bg + "88"} stroke={catColor.border} strokeWidth="1.5" />}
-                  {/* highlight reachable/attackable */}
-                  {isReachable && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill="rgba(76,201,76,.22)" stroke="none" />}
-                  {isAttackable && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill={`rgba(201,76,76,${hasEnemy ? .28 : .10})`} stroke="none" />}
-                  {/* highlight ช่องวางกับดักได้ (ยืน + รอบตัว 1 ช่อง) */}
-                  {isTrapTarget && <polygon points={hexPoints(x, y, HEX_SIZE - 2)} fill="rgba(201,168,76,.22)" stroke="#c9a84c" strokeWidth="1.6" strokeDasharray="4 2" />}
-                  {/* terrain icon */}
-                  <text x={x} y={y - 10} className="hex-label" fontSize="16">{terrain.ico}</text>
-                  {/* Zone icon + name */}
-                  {zoneData && (
-                    <>
-                      <text x={x} y={y + 6} fontSize="20" textAnchor="middle" dominantBaseline="middle" fill="rgba(255,255,255,.95)">{zoneData.ico}</text>
-                      <text x={x} y={y + 22} fontSize="7" textAnchor="middle" fill={catColor?.border || "rgba(255,255,255,.75)"}>{zoneData.name}</text>
-                    </>
-                  )}
-                  {/* กับดัก */}
-                  {cell.trap && <text x={x + 16} y={y - 16} fontSize="10">🪤</text>}
-                  {/* ร้านค้า badge */}
-                  {zoneData?.category === "shop" && <text x={x - 16} y={y - 18} fontSize="9">🛒</text>}
-                  {/* เควส badge */}
-                  {zoneData?.category === "quest" && <text x={x - 16} y={y - 18} fontSize="9">📋</text>}
-                </g>
-              );
-            })}
-
-            {/* ── Player Tokens (สัญลักษณ์ชัดเจน) ── */}
-            {players.map((p, i) => {
-              if (!p.alive) return null;
-              // ม่านหมอก — ซ่อนโทเคนผู้เล่นอื่น เว้นแต่ยืนช่องเดียวกัน (server ตั้ง hiddenByFog)
-              if (p.hiddenByFog && i !== myIdx) return null;
-              const { x, y } = hexToPixel(p.col, p.row, HEX_SIZE);
-              const cls = CLASSES[p.classId];
-              const isCurrentTurn = currentTurn === i;
-              const isMe = i === myIdx;
-              const sameCell = players.filter(pp => pp.alive && pp.col === p.col && pp.row === p.row);
-              const slotIdx = sameCell.findIndex(pp => pp.id === p.id);
-              const offX = sameCell.length > 1 ? (slotIdx - (sameCell.length - 1) / 2) * 16 : 0;
-              const tx = x + offX - 16;
-              const ty = y - 12 - 16;
-              const fogged = p.fogged && !isMe;
-              const pColor = fogged ? "#555" : (p.playerColor || "#888");
-              const tokenIco = fogged ? "❓" : cls?.ico;
-              const tokenName = fogged ? "ปริศนา" : p.name.slice(0, 6);
-              const showHp = !fogged; // ม่านหมอก: ไม่เผยแถบ HP ของคนอื่น
-
-              return (
-                <g key={i} className={`player-token${isCurrentTurn ? " current-player" : ""}`} transform={`translate(${tx},${ty})`}>
-                  {/* วงกลมพื้น */}
-                  <circle cx="16" cy="16" r="16" fill={pColor} stroke={isCurrentTurn ? "#ffd700" : isMe ? "#ffffff" : "rgba(0,0,0,.5)"} strokeWidth={isCurrentTurn ? 3 : isMe ? 2 : 1} />
-                  {/* class icon ใหญ่ */}
-                  <text x="16" y="16" textAnchor="middle" dominantBaseline="middle" fontSize="18">{tokenIco}</text>
-                  {/* player label มุมบน */}
-                  {!fogged && <text x="28" y="4" fontSize="8" fill="#fff" fontWeight="bold" textAnchor="middle"
-                    style={{ textShadow: "0 0 3px #000" }}>{p.playerLabel || `P${i + 1}`}</text>}
-                  {/* HP bar */}
-                  {showHp && <rect x="2" y="30" width="28" height="4" rx="2" fill="rgba(0,0,0,.5)" />}
-                  {showHp && <rect x="2" y="30" width={28 * (p.hp / p.maxHp)} height="4" rx="2" fill={p.hp > p.maxHp * 0.5 ? "#4cc94c" : p.hp > p.maxHp * 0.25 ? "#f0d080" : "#c94040"} />}
-                  {/* Name */}
-                  <text x="16" y="42" textAnchor="middle" fontSize="7" fill="rgba(255,255,255,.9)"
-                    style={{ textShadow: "0 1px 2px #000" }}>{tokenName}</text>
-                  {/* เทิร์นปัจจุบัน — ประกาย */}
-                  {isCurrentTurn && <circle cx="16" cy="16" r="18" fill="none" stroke="#ffd700" strokeWidth="2" opacity="0.6" strokeDasharray="4 2" />}
-                </g>
-              );
-            })}
-          </svg>
+                >✓ ยืนยัน</button>
+                <button
+                  onClick={cancelMove}
+                  style={{
+                    background: "rgba(201,76,76,.18)", border: "1px solid #c94040",
+                    color: "#e08080", borderRadius: "8px", padding: "6px 16px",
+                    fontSize: "12px", cursor: "pointer",
+                  }}
+                >✕ ยกเลิก</button>
+              </div>
+            </div>
+          )}
 
           {/* ── Map Legend Button ── */}
           <button
@@ -635,7 +692,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           me={me} isMyTurn={isMyTurn} currentPlayer={currentPlayer} phase={phase} maxPhases={maxPhases}
           actionsDone={actionsDone} actionMode={actionMode} selectedCard={selectedCard}
           onMove={() => {
-            if (!isMyTurn || actionsDone.moved) return;
+            if (!isMyTurn || (actionsDone.moveLeft ?? 0) <= 0) return;
             setSelectedCard(null);
             setAttackableCells([]);
             setActionMode(prev => prev === "move" ? null : "move");
@@ -664,6 +721,15 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
               setSelectedCard(null); setActionMode(null);
               return;
             }
+            // โจมตีหมู่: all/randomN/รัศมีรอบตัว → ใช้ทันที | line/รัศมีตามจุด → ต้องเลือกช่อง
+            if (t === "aoe") {
+              const needsTile = c.aoeMode === "line" || (c.aoeMode === "pointRadius" && c.byTile);
+              if (!needsTile) {
+                onGameAction("use_card", { cardUid: c.uid });
+                setSelectedCard(null); setActionMode(null);
+                return;
+              }
+            }
             setActionMode(actionMode === "card" ? null : "card");
           }}
           onEndTurn={endTurn}
@@ -671,11 +737,37 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           setTooltip={setTooltip}
           onDeckClick={reopenDraw}
           deckReady={isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)}
+          onUseSkill={(skill) => {
+            // สกิลที่ใช้ทันที (ไม่ต้องเลือกเป้าหมาย)
+            const noTargetSkills = new Set(["open_route","blizzard","arrow_rain","self_heal","sword_wind","elixir","shout_command"]);
+            if (noTargetSkills.has(skill.id)) {
+              onGameAction("use_skill", {});
+            } else {
+              // สกิลต้องการเป้าหมาย — toggle skill targeting mode
+              setActionMode(prev => prev === "skill" ? null : "skill");
+              setSelectedCard(null);
+            }
+          }}
+          onUseKingSkill={(ks) => {
+            const noTargetKing = new Set(["drill_troops","royal_envoy","winter","royal_blessing","shadow_hunt","iron_fortress","fire_rain","immortal_potion","battle_pact"]);
+            if (noTargetKing.has(ks.id)) {
+              onGameAction("use_king_skill", {});
+            } else {
+              setActionMode(prev => prev === "king_skill" ? null : "king_skill");
+            }
+          }}
         />
       </div>
 
       <DiceAnimation roll={showDice} />
       <EventBanner event={activeEvent} />
+      <EventCardModal reveal={eventModal} onClose={() => setEventModal(null)} />
+      <InterruptPrompt
+        interrupt={serverGameState?.pendingInterrupt}
+        myIdx={myIdx}
+        myHand={me?.hand || []}
+        onRespond={(uid) => onGameAction("interrupt_respond", { cardUid: uid })}
+      />
       <Tooltip tooltip={tooltip} />
 
       {/* ═══ LEGEND MODAL ═══ */}
@@ -696,7 +788,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                   { ico: "🌿", color: "#2d5a27", name: "ที่ราบ", move: 1, desc: "ทั่วไป" },
                   { ico: "🌲", color: "#1a4a1a", name: "ป่าไม้", move: 2, desc: "เดินช้า" },
                   { ico: "⛰️", color: "#4a4040", name: "ภูเขา", move: 3, desc: "เดินยาก" },
-                  { ico: "🌊", color: "#1a3a5a", name: "แม่น้ำ", move: 99, desc: "ผ่านไม่ได้" },
+                  { ico: "🌊", color: "#1a3a5a", name: "แม่น้ำ", move: 3, desc: "ลุยน้ำ ช้า" },
                   { ico: "🏜️", color: "#6a5a30", name: "ทะเลทราย", move: 2, desc: "ร้อนจัด" },
                   { ico: "🌿", color: "#2a4a30", name: "หนองน้ำ", move: 3, desc: "ชื้นแฉะ" },
                 ].map(t => (
@@ -704,7 +796,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                     <span style={{ fontSize: "16px" }}>{t.ico}</span>
                     <div>
                       <div style={{ fontSize: "11px", fontWeight: "bold" }}>{t.name}</div>
-                      <div style={{ fontSize: "9px", color: "rgba(232,213,176,.6)" }}>SPD ×{t.move === 99 ? "∞(หยุด)" : t.move} — {t.desc}</div>
+                      <div style={{ fontSize: "9px", color: "rgba(232,213,176,.6)" }}>ต้นทุนเดิน {t.move === 99 ? "∞(ผ่านไม่ได้)" : t.move} — {t.desc}</div>
                     </div>
                   </div>
                 ))}
@@ -854,10 +946,9 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                       <div style={{ fontSize: "11px", color: "var(--txt-m)", margin: "2px 0" }}>{q.desc}</div>
                       <div style={{ fontSize: "10px", color: "#40c080" }}>
                         🏆 รางวัล: {[
-                          q.reward.gold && `+${q.reward.gold} ทอง`, q.reward.exp && `+${q.reward.exp} EXP`,
-                          q.reward.hp && `+${q.reward.hp} HP`, q.reward.mana && `+${q.reward.mana} มานา`,
+                          q.reward.maxHp && `+${q.reward.maxHp} HP สูงสุด`, q.reward.maxMana && `+${q.reward.maxMana} มานาสูงสุด`,
                           q.reward.atk && `+${q.reward.atk} ATK`, q.reward.def && `+${q.reward.def} DEF`,
-                          q.reward.cards && `+${q.reward.cards} การ์ด`,
+                          q.reward.spd && `+${q.reward.spd} SPD`, q.reward.gold && `+${q.reward.gold} ทอง`,
                         ].filter(Boolean).join(", ")}
                         {q.visitCount > 1 ? ` · ต้องไป ${q.visitCount} ครั้ง` : ""}
                       </div>
@@ -880,14 +971,16 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             onClick={e => e.stopPropagation()}>
             <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "4px", fontSize: "16px", textAlign: "center" }}>📊 สถานะผู้เล่นทั้งหมด</h3>
             <div style={{ fontSize: "10px", color: "var(--txt-m)", textAlign: "center", marginBottom: "14px" }}>
-              {fogActive ? "🌫️ ม่านหมอกปกคลุม — ข้อมูลของผู้เล่นอื่นถูกปกปิด (ยกเว้นพระราชา)" : "อุปกรณ์สวมใส่ · สถานะ · ค่าพลังปัจจุบัน"}
+              {fogActive ? "🌫️ ม่านหมอกปกคลุม — ข้อมูลของผู้เล่นอื่นถูกปกปิด (ยกเว้นพระราชา)" : "👆 คลิกผู้เล่นเพื่อดูความสามารถตัวละคร · อุปกรณ์ · ค่าพลังปัจจุบัน"}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))", gap: "10px" }}>
               {players.map((p, i) => {
                 const cls = CLASSES[p.classId] || CLASSES.hidden;
                 const role = ROLES[p.role];
+                const isPicked = statusSel === i;
                 return (
-                  <div key={i} style={{ background: "var(--s3)", border: `1px solid ${p.alive ? "rgba(201,168,76,.2)" : "rgba(192,64,64,.3)"}`, borderRadius: "10px", padding: "12px", opacity: p.alive ? 1 : 0.6 }}>
+                  <div key={i} onClick={() => setStatusSel(i)}
+                    style={{ background: isPicked ? "rgba(201,168,76,.12)" : "var(--s3)", border: `1.5px solid ${isPicked ? "var(--gold)" : p.alive ? "rgba(201,168,76,.2)" : "rgba(192,64,64,.3)"}`, borderRadius: "10px", padding: "12px", opacity: p.alive ? 1 : 0.6, cursor: "pointer", transition: "border-color .12s, background .12s", boxShadow: isPicked ? "0 0 14px rgba(201,168,76,.25)" : "none" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                       <span style={{ fontSize: "22px" }}>{p.alive ? cls?.ico : "💀"}</span>
                       <div>
@@ -925,6 +1018,41 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                 );
               })}
             </div>
+
+            {/* ── ความสามารถตัวละคร — โชว์เฉพาะตัวที่เลือกในรอบนั้นๆ ── */}
+            {(() => {
+              const sp = players[statusSel];
+              const ch = sp && CHARACTERS[sp.charId];
+              if (!sp || !ch) return null;
+              const skillRow = (tag, tagColor, s) => s && (
+                <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", padding: "7px 0", borderBottom: "1px dashed rgba(201,168,76,.12)" }}>
+                  <span style={{ flexShrink: 0, fontSize: "9px", fontWeight: 700, color: tagColor, border: `1px solid ${tagColor}`, borderRadius: "5px", padding: "2px 6px", minWidth: "58px", textAlign: "center" }}>{tag}</span>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--gold-l)", fontWeight: 600 }}>{s.name}{s.cost ? <span style={{ color: "#6cb6e0", fontWeight: 400 }}> · 💧{s.cost}</span> : null}</div>
+                    <div style={{ fontSize: "11px", color: "#e8d5b0", lineHeight: 1.55, opacity: .92 }}>{s.desc}</div>
+                  </div>
+                </div>
+              );
+              return (
+                <div style={{ marginTop: "14px", background: "rgba(0,0,0,.25)", border: `1px solid ${ch.color || "var(--gold)"}55`, borderRadius: "12px", padding: "14px 16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "30px" }}>{ch.ico}</span>
+                    <div>
+                      <div style={{ fontFamily: "'Cinzel',serif", fontSize: "15px", color: ch.color || "var(--gold)" }}>{ch.name}{statusSel === myIdx ? " (คุณ)" : ""}</div>
+                      <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: 1.5 }}>{ch.desc}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "4px 10px", fontSize: "10px", color: "var(--txt-m)", marginBottom: "8px" }}>
+                    <span>❤ HP {ch.hp}</span><span>💧 มานา {ch.mana}</span><span>🗺 SPD {ch.move}</span>
+                    <span>⚔️ ATK {ch.atk}</span><span>🛡️ DEF {ch.def}</span><span>🎯 ระยะ {ch.range}</span>
+                  </div>
+                  {skillRow("🟢 Passive", "#4cc94c", ch.passive)}
+                  {skillRow("🟡 Active", "#e8c84a", ch.active)}
+                  {skillRow("👑 ราชา", "#c9a84c", ch.kingSkill)}
+                </div>
+              );
+            })()}
+
             <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "14px" }} onClick={() => setShowStatus(false)}>✓ ปิด</button>
           </div>
         </div>
@@ -966,10 +1094,9 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                   )}
                   <div style={{ fontSize: "11px", color: "var(--gold-l)", marginBottom: "4px" }}>
                     🏆 รางวัล: {[
-                      q.reward?.gold && `+${q.reward.gold} ทอง`, q.reward?.exp && `+${q.reward.exp} EXP`,
-                      q.reward?.hp && `+${q.reward.hp} HP`, q.reward?.mana && `+${q.reward.mana} มานา`,
+                      q.reward?.maxHp && `+${q.reward.maxHp} HP สูงสุด`, q.reward?.maxMana && `+${q.reward.maxMana} มานาสูงสุด`,
                       q.reward?.atk && `+${q.reward.atk} ATK`, q.reward?.def && `+${q.reward.def} DEF`,
-                      q.reward?.cards && `+${q.reward.cards} การ์ด`,
+                      q.reward?.spd && `+${q.reward.spd} SPD`, q.reward?.gold && `+${q.reward.gold} ทอง`,
                     ].filter(Boolean).join(", ")}
                   </div>
                   <div style={{ fontSize: "10px", color: "var(--txt-d)", fontStyle: "italic" }}>💬 {q.hint}</div>
@@ -987,26 +1114,37 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
       {/* RULES — กฎละเอียด + หมวดวิธีเล่น */}
       {showRules && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
-          onClick={() => setShowRules(false)}>
-          <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.3)", borderRadius: "16px", padding: "24px", maxWidth: "640px", width: "100%", maxHeight: "86vh", overflowY: "auto" }}
-            onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "4px", fontSize: "18px", textAlign: "center" }}>📖 คู่มือการเล่น บัลลังก์เงา</h3>
-            <div style={{ fontSize: "11px", color: "var(--txt-m)", textAlign: "center", marginBottom: "16px" }}>
-              เกมวางแผนชิงไหวชิงพริบ ผสมดวงลูกเต๋า — เอาตัวรอดและพิชิตเป้าหมายฝ่ายของคุณ
+        <div className="rules-overlay" onClick={() => setShowRules(false)}>
+          <div className="rules-panel" onClick={e => e.stopPropagation()}>
+            <button className="rules-close" onClick={() => setShowRules(false)} aria-label="ปิด">✕</button>
+            <div className="rules-head">
+              <div className="rules-crest">📖</div>
+              <h3 className="rules-title">คู่มือการเล่น</h3>
+              <div className="rules-sub cinzel">บัลลังก์เงา · Shadow of Throne</div>
+              <div className="rules-tag">เกมวางแผนชิงไหวชิงพริบ ผสมดวงลูกเต๋า — เอาตัวรอดและพิชิตเป้าหมายฝ่ายของคุณ</div>
             </div>
 
-            {[
+            <div className="rules-body">
+            {(() => { const SECTIONS = [
               {
-                cat: "🎯 เป้าหมายและบทบาท", items: [
-                  ["บทบาทลับ", "เริ่มเกมทุกคนได้บทบาทลับ ยกเว้น 👑 พระราชาที่ต้องเปิดเผยตัวต่อทุกคน บทบาทอื่นจะถูกปิดไว้จนกว่าผู้เล่นนั้นจะแพ้ (ตาย) จึงเปิดเผย"],
-                  ["พระราชา 👑", "รักษาบัลลังก์ ปราบกบฏให้หมด หรืออยู่รอดครบทุกเฟส"],
+                cat: "ลำดับการเริ่มเกม", ico: "🎴", accent: "#e08040", items: [
+                  ["1 · กดพร้อมในล็อบบี้", "ทุกคนเข้าห้องแล้วกด 'พร้อม' — ขั้นนี้ยังไม่ต้องเลือกตัวละคร"],
+                  ["2 · สุ่มบทบาทลับ", "เมื่อเริ่มเกม ระบบจะ 'สุ่มแจกบทบาท' ให้ก่อน แตะการ์ดเพื่อเปิดดูบทบาทลับของตัวเอง แล้วกดยืนยัน — ห้ามให้คนอื่นเห็น!"],
+                  ["3 · เลือกตัวละคร (👑 ราชาก่อน)", "หลังทุกคนยืนยันบทบาทแล้ว จึงเลือกตัวละคร — พระราชาเลือกก่อน 1 คน จากนั้นผู้เล่นที่เหลือเลือกพร้อมกัน · ห้ามเลือกซ้ำ (ตัวที่ถูกจองจะล็อก 🔒)"],
+                  ["4 · เลือกเควสรอง", "เข้าสนามแล้วเลือกเควสรองลับ 1 จาก 3 ตัวเลือก เป็นเป้าหมายเสริมที่ให้รางวัล 'เพิ่มเพดานพลัง' เมื่อสำเร็จ"],
+                  ["ของเริ่มต้น", "ทุกคนเริ่มด้วยการ์ดในมือ 4 ใบ, ทอง 4, และอุปกรณ์เริ่มต้นของตัวละคร (ถ้ามี)"],
+                ]
+              },
+              {
+                cat: "เป้าหมายและบทบาท", ico: "🎯", accent: "#c9a84c", items: [
+                  ["บทบาทลับ", "เริ่มเกมทุกคนได้บทบาทลับ ยกเว้น 👑 พระราชาที่ต้องเปิดเผยตัวต่อทุกคน บทบาทอื่นจะถูกปิดไว้จนกว่าผู้เล่นนั้นจะแพ้ (ตาย) จึงเปิดเผย — สกิลสอดแนม/ทำนายจะเห็นบทบาท 'เฉพาะตัวคุณเอง' เท่านั้น ไม่เปิดให้ทั้งห้อง"],
+                  ["พระราชา 👑", "รักษาบัลลังก์ ปราบกบฏให้หมด หรืออยู่รอดครบทุกเฟส — ยิ่งผู้เล่นในเกมมาก ราชายิ่งได้บัฟค่าสถานะสูงขึ้น (สมดุลกับการถูกรุม)"],
                   ["กบฏ ⚔️", "โค่นพระราชา (HP=0) เพื่อยึดอำนาจ"],
                   ["คนทรยศ/ราษฎร", "สะสมทรัพย์ เอาตัวรอดเป็นคนสุดท้าย"],
                 ]
               },
               {
-                cat: "🔄 ระบบเทิร์นและเฟส", items: [
+                cat: "ระบบเทิร์นและเฟส", ico: "🔄", accent: "#60a0c0", items: [
                   ["ลำดับเล่น", "พระราชาเปิดตัวและเริ่มเล่นก่อน จากนั้นสุ่มลำดับผู้เล่นที่เหลือ เมื่อทุกคนเล่นครบ 1 รอบ = 1 เฟส"],
                   ["จำนวนเฟส", `เกมมีทั้งหมด ${maxPhases} เฟส เมื่อทุกคนเล่นครบรอบจะขึ้นเฟสใหม่และเกิดเหตุการณ์สุ่มประจำเฟส (การ์ดจั่วเริ่มเทิร์น 2 ใบทุกเทิร์น)`],
                   ["👹 โหมดบอส", "หากเล่นครบทุกเฟสยังไม่มีผู้ชนะ บอสจะปรากฏและโจมตีทุกคนทุกเทิร์น แรงขึ้นเรื่อยๆ จนเหลือผู้ชนะ"],
@@ -1014,48 +1152,119 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                 ]
               },
               {
-                cat: "🚶 การเดินและระยะ", items: [
-                  ["ระยะเดิน", "ทุกอาชีพเดินได้ระยะ 3 ต่อเทิร์น (ภูเขา/ป่า/หนองน้ำใช้ค่าเดินมากกว่า น้ำผ่านไม่ได้)"],
-                  ["⚔️ ระยะโจมตีปกติ", "โจมตีได้แค่ช่องเดียวกันเท่านั้น (ต้องเดินไปยืนบนช่องศัตรู) — ยกเว้นสวมอุปกรณ์ที่ให้ระยะไกล เช่น ธนู/ไม้เท้า"],
+                cat: "การเดิน (งบเดิน 5)", ico: "🚶", accent: "#4cc94c", items: [
+                  ["งบเดิน 5 ต่อเทิร์น", "ทุกตัวละครได้ 'งบเดิน' 5 หน่วยต่อเทิร์น — แต่ละก้าวหักด้วยต้นทุนภูมิประเทศ (ที่ราบ 1 · ป่า/ทะเลทราย 2 · ภูเขา/หนองน้ำ 3 · น้ำผ่านไม่ได้)"],
+                  ["เดินเป็นช่วงๆ ได้", "เดินทีละช่วงได้ — ถ้ายังเหลืองบเดิน ระบบจะคำนวณจากช่องที่เดินไปแล้วและให้เดินต่อได้อีก จนกว่างบจะหมด (ทำอย่างอื่นสลับได้)"],
+                  ["✅ ยืนยันก่อนเดิน", "คลิกช่องปลายทางที่ไฮไลต์ → ช่องจะกระพริบพร้อมหมุด 📍 และมีปุ่มให้ 'ยืนยัน' หรือ 'ยกเลิก' ก่อนเดินจริง กันกดพลาด"],
+                  ["🎯 ระยะโจมตี = อุปกรณ์ + SPD", "ระยะโจมตีพื้นฐานมาจากอุปกรณ์ระยะไกล (ธนู/ไม้เท้า) บวกโบนัสจากค่า SPD อัตราส่วน 2:1 (SPD 2 = +1 ระยะ) — ดูหมวด 'การต่อสู้'"],
                 ]
               },
               {
-                cat: "🎲 การต่อสู้และดวง", items: [
-                  ["ทอยโจมตี vs หลบ", "ผู้โจมตีทอย d6 + โบนัส ATK ฝ่ายตั้งรับทอย d6 + โบนัสหลบ (จากความเร็วและเลือดที่เหลือ)"],
-                  ["ดวงมวยรอง", "ถ้าค่าสถานะตัวละคร 2 ฝ่ายห่างกันมาก ฝ่ายที่อ่อนกว่าจะได้โบนัสหลบเพิ่ม ทำให้พลิกเกมได้ด้วยดวง"],
+                cat: "การต่อสู้ · ค่าสถานะ · ดวง", ico: "🎲", accent: "#c94040", items: [
+                  ["💥 ดาเมจ = ATK − DEF", "เมื่อโจมตีโดน ความเสียหาย = ค่า ATK ของผู้โจมตี ลบด้วย DEF ของฝ่ายรับ (อย่างน้อย 1) — ยิ่ง ATK สูง/DEF เป้าต่ำ ยิ่งเจ็บ"],
+                  ["⚡ SPD เพิ่มระยะ (2:1)", "ค่า SPD เพิ่มระยะโจมตีในอัตรา 2:1 (SPD 2 = +1 ระยะ) และยังเพิ่มโอกาสหลบด้วย"],
+                  ["⚡ ชาร์จความเร็ว", "ถ้าเทิร์นนั้น 'ไม่เดิน และ ไม่โดนความเสียหาย' จะชาร์จ SPD +1 ต่อเทิร์น (สูงสุด +2) เพิ่มทั้งระยะและการหลบ — แต่เมื่อ 'เดินหรือโจมตี' SPD จะกลับคืนค่าเริ่มต้นทันที"],
+                  ["ทอยโจมตี vs หลบ", "ผู้โจมตีทอย d6 + โบนัส ATK · ฝ่ายตั้งรับทอย d6 + โบนัสหลบ (จาก SPD และเลือดที่เหลือ)"],
+                  ["ดวงมวยรอง", "ถ้าค่าสถานะ 2 ฝ่ายห่างกันมาก ฝ่ายที่อ่อนกว่าจะได้โบนัสหลบเพิ่ม พลิกเกมได้ด้วยดวง"],
                   ["ผลทอย", "ถ้าแต้มตั้งรับ ≥ แต้มโจมตี = หลบสำเร็จ · ทอย 6 = คริติคอล · ทอย 1 = พลาดเสมอ"],
                 ]
               },
               {
-                cat: "🃏 การ์ดและอุปกรณ์", items: [
+                cat: "การ์ดและอุปกรณ์", ico: "🃏", accent: "#a060e0", items: [
                   ["ถือไพ่จำกัด", "ถือการ์ดในมือได้ไม่เกินค่า HP ปัจจุบัน (สูงสุด 10 ใบ) ถ้าเกินลิมิตจะต้องเลือกทิ้งเอง"],
                   ["จั่วเริ่มเทิร์น", "เริ่มเทิร์นจั่วการ์ด 2 ใบจากกองจั่ว — คลิกเปิดไพ่เพื่อลุ้น แล้วเก็บเข้ามือ"],
                   ["ใช้การ์ดได้ 4 ใบ/เทิร์น", "แต่ละเทิร์นใช้การ์ดได้ไม่เกิน 4 ใบ (รวมอาวุธ/เวทย์/กับดัก) — แยกจากการเดินและการโจมตี"],
                   ["อาวุธ/เกราะ", "ใช้เพื่อสวมใส่ถาวร เพิ่ม ATK/DEF/ระยะ และเอฟเฟกต์ (เผา/แช่แข็ง/สะท้อน ฯลฯ)"],
                   ["เวทมนตร์", "ใช้มานา ทำดาเมจ/ฟื้น HP/ติดสถานะ บางใบเป็น AOE โดนหลายเป้า"],
-                  ["กับดัก", "วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง (ช่องที่วางได้จะถูกไฮไลต์) ศัตรูที่เดินเหยียบจะติดผล (ดาเมจ/พิษ/ล็อก/ตาบอด/เผา/แช่แข็ง/สลายเกราะ)"],
+                  ["🪤 กับดัก", "วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง (ช่องที่วางได้จะถูกไฮไลต์) — ใครก็ตามที่เดินเหยียบ (รวมถึงผู้วางเอง!) จะติดผลทั้งหมด (ดาเมจ/พิษ/ล็อก/ตาบอด/เผา/แช่แข็ง/สลายเกราะ) แล้วกับดักจะหายไปทันที"],
                 ]
               },
               {
-                cat: "🗺️ สถานที่และเควส", items: [
+                cat: "ทรัพยากรและค่าสถานะ", ico: "📊", accent: "#40c0c0", items: [
+                  ["❤ HP (เลือด)", "ค่าพลังชีวิต ถ้าลดถึง 0 = แพ้/ตาย และบทบาทจะถูกเปิดเผย · HP ยังเป็นลิมิตจำนวนการ์ดที่ถือได้ด้วย"],
+                  ["💧 มานา", "ใช้ร่ายสกิล active และการ์ดเวทมนตร์ · ฟื้นได้จากบางสถานที่ (แม่น้ำ/หอเวทย์/โอเอซิส)"],
+                  ["💰 ทอง", "ใช้ซื้อการ์ด/ของในร้านค้า · หาได้จากไร่นา ตลาด เควส สมบัติ"],
+                  ["⚔️ ATK / 🛡️ DEF", "ATK ใช้คำนวณดาเมจ (ATK − DEF ของเป้า) · DEF ลดดาเมจที่รับ — รวมจากค่าพื้นฐาน + อุปกรณ์ + สถานะ"],
+                  ["🗺 SPD (ความเร็ว)", "ค่าความเร็ว — เพิ่มระยะโจมตี (2:1) และโอกาสหลบ · ชาร์จเพิ่มได้เมื่ออยู่นิ่ง (ดูหมวดการต่อสู้)"],
+                  ["🎯 ระยะโจมตี", "ระยะที่โจมตีถึง = อุปกรณ์ระยะไกล + โบนัสจาก SPD (2:1)"],
+                ]
+              },
+              {
+                cat: "สถานะผิดปกติ", ico: "☠️", accent: "#a060e0", items: [
+                  ["☠️ พิษ (poison)", "เสีย HP ทุกต้นเทิร์นตามจำนวนเทิร์นที่ติด"],
+                  ["🔥 เผา (burn)", "เสีย HP ต่อเนื่องทุกเทิร์น — ติดจากสกิลไฟ/กับดัก"],
+                  ["❄️ แช่แข็ง (freeze) / 🔒 ล็อก (lock)", "ข้ามการกระทำบางอย่างในเทิร์นที่ติด (เดิน/โจมตีไม่ได้)"],
+                  ["🌑 ตาบอด (blind) / 🛡️ สลายเกราะ (armor break)", "ลดความแม่นยำ / ลดค่า DEF ชั่วคราว"],
+                  ["ล้างสถานะ", "การ์ด/สกิลบางอย่าง (เช่น หมอยา, นายพล) ล้างสถานะลบทั้งหมดได้"],
+                ]
+              },
+              {
+                cat: "ระบบสกิลตัวละคร", ico: "✨", accent: "#e8c84a", items: [
+                  ["🟢 Passive", "ทำงานอัตโนมัติตลอดเกม ไม่ต้องสั่ง (เช่น เลือดนักรบ ATK+1 เมื่อ HP สูง)"],
+                  ["🟡 Active", "กดปุ่มสกิลเพื่อใช้ ต้องมีมานาพอ — บางสกิลต้องเลือกเป้าหมาย (🎯)"],
+                  ["👑 สกิลราชา", "ใช้ได้เฉพาะผู้ที่เป็นพระราชา · ส่วนใหญ่ใช้ได้ครั้งเดียวต่อเฟส — ยกเว้น 🔮 ทำนายชะตา (oracle) ที่เลือกดูบทบาทผู้เล่น 1 คน และใช้ได้ครั้งเดียวตลอดทั้งเกม"],
+                ]
+              },
+              {
+                cat: "สถานที่และเควส", ico: "🗺️", accent: "#40c080", items: [
                   ["สถานที่พิเศษ", "เดินไปสถานที่ต่างๆ เพื่อรับผล เช่น ร้านค้า 🛒 ฟื้นเลือด รับการ์ด หรือเสี่ยงดวง (กดปุ่ม 📍 Legend ดูทั้งหมด)"],
-                  ["📜 เควสรองลับ", "ทุกคนเลือกเควสรอง 1 จาก 3 ตอนเริ่มเกม (ลับเฉพาะตัว คนอื่นไม่เห็น) เดินไปสถานที่เป้าหมายเพื่อรับรางวัล"],
+                  ["📜 เควสรองลับ", "ทุกคนเลือกเควสรอง 1 จาก 3 ตอนเริ่มเกม (ลับเฉพาะตัว คนอื่นไม่เห็น) เดินไปสถานที่เป้าหมายเพื่อรับรางวัล 'เพิ่มเพดานสถานะถาวร' (เช่น HP/มานาสูงสุด, ATK, DEF, SPD) + เงิน"],
                   ["📊 ดูสถานะ", "กดปุ่ม 📊 สถานะ บนแถบบน เพื่อดูอุปกรณ์และสถานะของผู้เล่นทุกคน"],
                 ]
               },
-            ].map(sec => (
-              <div key={sec.cat} style={{ marginBottom: "16px" }}>
-                <div style={{ fontFamily: "'Cinzel',serif", color: "var(--gold-l)", fontSize: "13px", marginBottom: "8px", paddingBottom: "4px", borderBottom: "1px solid rgba(201,168,76,.2)" }}>{sec.cat}</div>
-                {sec.items.map(([t, d]) => (
-                  <div key={t} style={{ marginBottom: "8px" }}>
-                    <div style={{ color: "var(--gold)", fontSize: "12px", marginBottom: "2px", fontWeight: 600 }}>{t}</div>
-                    <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: "1.6" }}>{d}</div>
+              {
+                cat: "เมื่อพระราชาล่ม & การพลิกฝ่าย", ico: "🗡️", accent: "#8c4cc9", items: [
+                  ["ราชาตาย", "เมื่อพระราชาถูกกำจัด เกมยังไม่จบทันที — ราษฎรคนหนึ่งจะได้รับข้อเสนอ 'รับโชคชะตา' ภายในเวลาจำกัด"],
+                  ["ยอมรับ → ทรยศ 🗡️", "ราษฎรที่ตอบรับจะกลายเป็น 'คนทรยศ' (โรลลับ) ส่วนราษฎรที่เหลือกลายเป็นกบฏ — ศึกชิงบัลลังก์รอบใหม่เริ่มขึ้น"],
+                  ["ปฏิเสธ/หมดเวลา", "ถ้าไม่มีใครรับ ราษฎรทั้งหมดแพ้ไปพร้อมฝั่งพระราชา"],
+                ]
+              },
+              {
+                cat: "เงื่อนไขแพ้–ชนะ", ico: "🏆", accent: "#c9a84c", items: [
+                  ["👑 พระราชาชนะ", "ปราบกบฏและทรยศทั้งหมด หรือครองบัลลังก์รอดจนครบทุกเฟส"],
+                  ["⚔️ กบฏชนะ", "สังหารพระราชาและยึดบัลลังก์สำเร็จ"],
+                  ["🗡️ ทรยศชนะ", "เป็นผู้รอดชีวิตคนสุดท้ายในสนาม"],
+                  ["🧑 ราษฎร", "ชนะไปพร้อมพระราชา — หรือพลิกบทบาทเมื่อราชาล่ม"],
+                ]
+              },
+            ];
+            const active = Math.min(ruleTab, SECTIONS.length - 1);
+            const sec = SECTIONS[active];
+            return (
+              <>
+                {/* แถบหมวด — คลิกเลือกอ่านทีละหมวด (ไม่พับซ้อนกันจนอ่านไม่ออก) */}
+                <div className="rules-tabs">
+                  {SECTIONS.map((s, i) => (
+                    <button key={s.cat} type="button"
+                      className={`rules-tab${i === active ? " active" : ""}`}
+                      style={{ "--accent": s.accent }}
+                      onClick={() => setRuleTab(i)}>
+                      <span className="rules-tab-ico">{s.ico}</span>
+                      <span className="rules-tab-name cinzel">{s.cat}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* เนื้อหาของหมวดที่เลือก */}
+                <div className="rules-sec rules-sec-open" style={{ "--accent": sec.accent }}>
+                  <div className="rules-sec-hd">
+                    <span className="rules-sec-ico">{sec.ico}</span>
+                    <span className="rules-sec-name cinzel">{sec.cat}</span>
                   </div>
-                ))}
-              </div>
-            ))}
+                  <div className="rules-items">
+                    {sec.items.map(([t, d]) => (
+                      <div key={t} className="rule-item">
+                        <div className="rule-t">{t}</div>
+                        <div className="rule-d">{d}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            );
+            })()}
+            </div>
 
-            <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "4px" }} onClick={() => setShowRules(false)}>✓ เข้าใจแล้ว</button>
+            <button className="rules-ok cinzel" onClick={() => setShowRules(false)}>✓ เข้าใจแล้ว เริ่มเล่น</button>
           </div>
         </div>
       )}

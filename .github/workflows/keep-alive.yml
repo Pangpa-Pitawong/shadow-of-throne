@@ -1,0 +1,23 @@
+name: Keep Render server awake
+
+# Render free tier หลับหลังไม่มี traffic ~15 นาที และ self-ping ภายในเซิร์ฟเวอร์
+# ปลุกตัวเองตอนหลับสนิทไม่ได้ (process ถูกแช่แข็ง). GitHub Actions ยิงจากภายนอก
+# ทุก 10 นาที → เป็น inbound traffic ทำให้ instance ตื่นค้างไว้ตลอด เพื่อนต่อปุ๊บติดปั๊บ
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # ทุก 10 นาที (GitHub อาจดีเลย์เล็กน้อยช่วง peak)
+  workflow_dispatch: {}        # ปลุกเองได้จากหน้า Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -m 60 -o /dev/null -w "%{http_code}" https://sot-server-0te4.onrender.com/health || echo "000")
+            echo "Attempt $i → HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 15
+          done
+          echo "Server did not respond 200 after retries (อาจกำลัง cold start)"

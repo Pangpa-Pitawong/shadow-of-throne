@@ -1,9 +1,54 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import GameBoard from "./game/components/GameBoard";
 import "./lobby/lobby.css";
-import { WS_URL } from "./lobby/wsConfig";
+import { WS_URL, warmServer } from "./lobby/wsConfig";
 import { ROLES } from "./game/constants/roles";
-import { CLASSES } from "./game/constants/classes";
+import { CHARACTERS } from "./game/constants/characters";
+import CharIcon from "./game/components/CharIcon.jsx";
+
+// ─── MAP CONFIG helpers ──────────────────────────────────────────────────────
+const TERRAIN_LABELS = {
+  forest: "🌲 ป่า", mountain: "⛰️ ภูเขา", desert: "🏜️ ทะเลทราย",
+  swamp: "🥾 บึง", water: "🌊 น้ำ",
+};
+const AMT_LABELS = ["น้อย", "ปกติ", "มาก"];
+const DENSITY_LABELS = ["น้อย", "ปกติ", "มาก"];
+
+// จำนวนสถานที่พิเศษบนแมพ (ต้องตรงกับ logic ใน server.js createInitialGameState)
+//   โซนหลัก 6 (มีเสมอ) · อันตราย 6 · ร้านค้า 4 · เสริม 8 = สูงสุด 24 จุด
+const ZONE_GROUPS = { core: 6, danger: 6, shop: 4, extra: 8 };
+function zoneCountEstimate(cfg) {
+  const p = cfg.zoneDensity === 0 ? 0.4 : cfg.zoneDensity === 2 ? 1 : 0.78;
+  const shopP = Math.max(p, 0.6);
+  const core = ZONE_GROUPS.core;
+  const danger = cfg.dangerZones ? Math.round(ZONE_GROUPS.danger * p) : 0;
+  const shop = cfg.shops ? Math.round(ZONE_GROUPS.shop * shopP) : 0;
+  const extra = Math.round(ZONE_GROUPS.extra * p);
+  const expected = core + danger + shop + extra;
+  const max = core + (cfg.dangerZones ? ZONE_GROUPS.danger : 0) + (cfg.shops ? ZONE_GROUPS.shop : 0) + ZONE_GROUPS.extra;
+  return { expected, max, core, danger, shop, extra };
+}
+
+// สรุปการตั้งค่าแมพเป็นข้อความสั้นๆ (โชว์ในล็อบบี้/หน้าเข้าร่วม)
+function mapCfgSummary(cfg) {
+  if (!cfg) return null;
+  if (cfg.random) return ["🎲 ภูมิประเทศ: สุ่มทั้งหมด"];
+  const lines = [];
+  const more = [], less = [];
+  for (const [k, lbl] of Object.entries(TERRAIN_LABELS)) {
+    const a = cfg.terrain?.[k] ?? 1;
+    if (a === 2) more.push(lbl);
+    else if (a === 0) less.push(lbl);
+  }
+  if (more.length) lines.push("เยอะ: " + more.join(" "));
+  if (less.length) lines.push("น้อย: " + less.join(" "));
+  if (!more.length && !less.length) lines.push("ภูมิประเทศ: สมดุล");
+  const z = zoneCountEstimate(cfg);
+  lines.push(`สถานที่พิเศษ: ${DENSITY_LABELS[cfg.zoneDensity ?? 1]} (≈ ${z.expected} จุด)` +
+    (cfg.dangerZones === false ? " · ปิดโซนอันตราย" : "") +
+    (cfg.shops === false ? " · ปิดร้านค้า" : ""));
+  return lines;
+}
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ShadowThrone() {
@@ -24,7 +69,11 @@ export default function ShadowThrone() {
 
   // ── Identity ──────────────────────────────────────────────────────────────
   const [myName, setMyName] = useState("");
-  const [myClass, setMyClass] = useState("");
+  const [myClass, setMyClass] = useState(""); // charId ที่เลือก
+
+  // ── Traitor Offer ─────────────────────────────────────────────────────────
+  const [traitorOffer, setTraitorOffer] = useState(null); // { countdown } | null
+  const traitorTimerRef = useRef(null);
   const myNameRef = useRef(""); // stable ref to avoid stale closure bugs
 
   // ── Room state ────────────────────────────────────────────────────────────
@@ -42,6 +91,17 @@ export default function ShadowThrone() {
   const [newMode, setNewMode] = useState("standard");
   const [newVis, setNewVis] = useState("public"); // "public" | "private"
 
+  // ── Map config (ตั้งค่าภูมิประเทศ/สถานที่ตอนสร้างห้อง) ─────────────────────
+  const [mapCfg, setMapCfg] = useState({
+    random: false,
+    terrain: { forest: 1, mountain: 1, desert: 1, swamp: 1, water: 1 },
+    zoneDensity: 1,
+    dangerZones: true,
+    shops: true,
+  });
+  const setTerrainAmt = (key, v) =>
+    setMapCfg(c => ({ ...c, terrain: { ...c.terrain, [key]: v } }));
+
   // ── Join form ─────────────────────────────────────────────────────────────
   const [joinCode, setJoinCode] = useState("");
   const [joinName, setJoinName] = useState("");
@@ -55,6 +115,9 @@ export default function ShadowThrone() {
   const [myRole, setMyRole] = useState(null);
   const [roleConfirmed, setRoleConfirmed] = useState(false); // I confirmed
   const [allRolesReady, setAllRolesReady] = useState(false); // everyone confirmed
+
+  // ── Character select (after role reveal) ───────────────────────────────────
+  const [charConfirmed, setCharConfirmed] = useState(false); // I locked my character
 
   // ── Server Config (สำหรับ Cloudflare Tunnel) ─────────────────────────────
   const [serverUrlInput, setServerUrlInput] = useState(
@@ -80,10 +143,17 @@ export default function ShadowThrone() {
     let ws;
     let reconnectTimer;
     let retryDelay = 2000; // เริ่มที่ 2 วินาที
+    let attempts = 0;      // นับครั้งที่ลองต่อ — ใช้แยก "cold start" ออกจาก error จริง
+    let connectStart = Date.now();
 
     function connect() {
       if (!alive) return;
-      setWsStatus("connecting");
+      attempts += 1;
+      connectStart = Date.now();
+      // ครั้งแรกที่ยังต่อไม่ติด = น่าจะ cold start (Render กำลังตื่น) → โชว์ "กำลังปลุกเซิร์ฟเวอร์"
+      setWsStatus(attempts === 1 ? "connecting" : "waking");
+      // ปลุกเซิร์ฟเวอร์ผ่าน HTTP คู่ขนานไปกับการต่อ WS — request ขาเข้าจะทำให้ Render ตื่น
+      warmServer();
       ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
@@ -91,6 +161,7 @@ export default function ShadowThrone() {
         if (!alive) return;
         setWsStatus("ok");
         retryDelay = 2000;          // reset delay เมื่อเชื่อมต่อสำเร็จ
+        attempts = 0;
 
         if (screenRef.current === "gameboard") {
           wsSend({ type: "request_game_state" });
@@ -119,6 +190,7 @@ export default function ShadowThrone() {
             setRoom(msg.room);
             if (msg.room.status === "started"
               && screenRef.current !== "roles"      // ✅ ใช้ ref แทน state
+              && screenRef.current !== "charselect"
               && screenRef.current !== "gameboard") {
               const myIdx = msg.room.players.findIndex(
                 p => p.name === myNameRef.current
@@ -130,6 +202,14 @@ export default function ShadowThrone() {
                 setAllRolesReady(false);
                 goScreen("roles"); // ✅ ใช้ goScreen
               }
+            }
+            // ทุกคนยืนยันบทบาทแล้ว → เข้าหน้าเลือกตัวละคร (พระราชาเลือกก่อน)
+            if (msg.room.status === "started" && msg.room.phase === "charselect"
+              && screenRef.current !== "gameboard"
+              && screenRef.current !== "charselect") {
+              setCharConfirmed(false);
+              setMyClass("");
+              goScreen("charselect");
             }
             break;
           }
@@ -173,9 +253,30 @@ export default function ShadowThrone() {
             break;
           }
 
+          // ── Traitor offer (ส่งเฉพาะผู้เล่นที่ถูกเลือก) ────────────────────
+          case "traitor_offer": {
+            let secs = msg.timeout || 30;
+            setTraitorOffer({ countdown: secs });
+            if (traitorTimerRef.current) clearInterval(traitorTimerRef.current);
+            traitorTimerRef.current = setInterval(() => {
+              secs -= 1;
+              setTraitorOffer(prev => prev ? { ...prev, countdown: secs } : null);
+              if (secs <= 0) {
+                clearInterval(traitorTimerRef.current);
+                setTraitorOffer(null);
+              }
+            }, 1000);
+            break;
+          }
+
           case "error":
             showToast("❌ " + msg.msg);
             setLoading(false);
+            // ถูกปฏิเสธตอนเลือก/ยืนยันตัวละคร → ล้างตัวเลือกให้เลือกใหม่
+            if (screenRef.current === "charselect") {
+              setCharConfirmed(false);
+              setMyClass("");
+            }
             break;
 
           default:
@@ -185,8 +286,18 @@ export default function ShadowThrone() {
 
       ws.onclose = () => {
         if (!alive) return;
-        setWsStatus("error");
-        retryDelay = Math.min(retryDelay * 1.5, 15000);
+        const elapsed = Date.now() - connectStart;
+        // ── cold start ของ Render ใช้เวลาได้ถึง ~50 วิ ──
+        //   ช่วง ~70 วินาทีแรก: ลองใหม่เร็วๆ (ทุก 2.5 วิ) เพื่อให้ต่อติดทันทีที่ server ตื่น
+        //   หลังจากนั้นถือว่ามีปัญหาจริง → backoff ยาวขึ้นกันยิงถี่
+        if (attempts <= 28) {
+          setWsStatus("waking");
+          // ถ้าเพิ่งปิดเร็วมาก (เช่น server ยังไม่ตื่น) เว้นอย่างน้อย 2.5 วิ
+          retryDelay = Math.max(0, 2500 - elapsed);
+        } else {
+          setWsStatus("error");
+          retryDelay = Math.min(Math.max(retryDelay * 1.5, 3000), 15000);
+        }
         reconnectTimer = setTimeout(connect, retryDelay);
       };
 
@@ -252,7 +363,7 @@ export default function ShadowThrone() {
     setLoadMsg("กำลังสร้างห้อง...");
     setMyClass("");
     // NOTE: code is generated SERVER-SIDE now — do NOT send a code
-    wsSend({ type: "create_room", playerName: name, maxPlayers: newCount, mode: newMode, visibility: newVis });
+    wsSend({ type: "create_room", playerName: name, maxPlayers: newCount, mode: newMode, visibility: newVis, mapConfig: mapCfg });
   };
 
   const joinRoom = (codeArg, nameArg) => {
@@ -266,13 +377,29 @@ export default function ShadowThrone() {
     wsSend({ type: "join_room", code, playerName: name });
   };
 
-  const pickClass = (clsId) => {
-    setMyClass(clsId);
-    wsSend({ type: "pick_class", classId: clsId });
+  const pickClass = (charId) => {
+    setMyClass(charId);
+    setCharConfirmed(false); // เปลี่ยนตัวละคร → ยกเลิกการยืนยันเดิม
+    // ส่งทั้ง 2 format เพื่อ compat กับ server ทั้งเก่าและใหม่
+    wsSend({ type: "pick_class", classId: charId });
+    wsSend({ type: "pick_character", charId });
+  };
+
+  // ยืนยันตัวละคร (ขั้นเลือกตัวละครหลังเปิดบทบาท)
+  const confirmCharacter = () => {
+    if (!myClass) { showToast("เลือกตัวละครก่อน"); return; }
+    setCharConfirmed(true);
+    wsSend({ type: "confirm_character" });
+  };
+
+  const respondTraitorOffer = (accepted) => {
+    if (traitorTimerRef.current) clearInterval(traitorTimerRef.current);
+    setTraitorOffer(null);
+    wsSend({ type: "traitor_response", accepted });
   };
 
   const toggleReady = () => {
-    if (!myClass) { showToast("เลือกอาชีพก่อน"); return; }
+    // ล็อบบี้ใหม่: กดพร้อมได้เลย — เลือกตัวละครย้ายไปหลังสุ่มบทบาท
     wsSend({ type: "toggle_ready" });
   };
 
@@ -287,6 +414,7 @@ export default function ShadowThrone() {
     setMyRole(null);
     setRoleConfirmed(false);
     setAllRolesReady(false);
+    setCharConfirmed(false);
     goScreen("title");
   };
 
@@ -312,7 +440,8 @@ export default function ShadowThrone() {
   const wsBadge =
     wsStatus === "ok" ? <span className="ws-badge ws-ok">● เชื่อมต่อแล้ว</span>
       : wsStatus === "connecting" ? <span className="ws-badge ws-connecting">○ กำลังเชื่อมต่อ...</span>
-        : <span className="ws-badge ws-err">✕ ไม่ได้เชื่อมต่อ — รีสตาร์ท server?</span>;
+        : wsStatus === "waking" ? <span className="ws-badge ws-connecting">🔌 กำลังปลุกเซิร์ฟเวอร์ (~30 วิ)...</span>
+          : <span className="ws-badge ws-err">✕ เชื่อมต่อไม่ได้ — ตรวจอินเทอร์เน็ต/ลองรีโหลด</span>;
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
@@ -339,6 +468,14 @@ export default function ShadowThrone() {
               {joinModal.mode === "quick" ? "โหมดด่วน" : joinModal.mode === "epic" ? "มหากาพย์" : "มาตรฐาน"}
               &ensp;·&ensp; {joinModal.players}/{joinModal.maxPlayers} คน
             </div>
+            {joinModal.mapConfig && (
+              <div className="mc-summary" style={{ textAlign: "left", margin: "10px 0 0" }}>
+                <b>🗺️ แผนที่:</b>
+                {(mapCfgSummary(joinModal.mapConfig) || []).map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            )}
             <div className="nm-divider" />
             <div className="nm-label">ชื่อที่ใช้ในเกม</div>
             <div className="nm-input-wrap">
@@ -482,7 +619,7 @@ export default function ShadowThrone() {
             <div className="mcard" onClick={() => goScreen("create")}>
               <span className="mico">🏰</span>
               <div className="mnm">สร้างห้อง</div>
-              <div className="mdesc">เริ่มเกมใหม่<br />3–6 ผู้เล่น</div>
+              <div className="mdesc">เริ่มเกมใหม่<br />3–8 ผู้เล่น</div>
             </div>
             <div className="mcard" onClick={() => goScreen("join")}>
               <span className="mico">⚔️</span>
@@ -494,13 +631,14 @@ export default function ShadowThrone() {
       </div>
 
       {/* ═══════════════ CREATE ROOM ═══════════════ */}
-      <div id="cr" className={`screen${screen === "create" ? " on" : ""}`}>
-        <div style={{ maxWidth: "440px", width: "100%", padding: "20px" }}>
+      <div id="cr" className={`screen${screen === "create" ? " on" : ""}`} style={{ overflowY: "auto" }}>
+        <div style={{ maxWidth: "880px", width: "100%", padding: "20px" }}>
           <div className="lhdr" style={{ marginBottom: "20px" }}>
             <button className="b-sm" onClick={() => goScreen("title")}>← กลับ</button>
             <h2 className="cinzel" style={{ fontSize: "18px", color: "var(--gold)" }}>🏰 สร้างห้องใหม่</h2>
           </div>
 
+          <div className="create-cols">
           <div className="sbox">
             <div className="sh">⚙ ตั้งค่าห้อง</div>
 
@@ -515,6 +653,8 @@ export default function ShadowThrone() {
                 <option value={4}>4 คน</option>
                 <option value={5}>5 คน</option>
                 <option value={6}>6 คน</option>
+                <option value={7}>7 คน</option>
+                <option value={8}>8 คน</option>
               </select>
             </div>
             <div className="row">
@@ -547,6 +687,86 @@ export default function ShadowThrone() {
               🎲 รหัสห้องจะถูกสร้างโดยอัตโนมัติ — แชร์ให้เพื่อนเพื่อเข้าร่วม
             </div>
           </div>
+
+          {/* ✨ NEW: ตั้งค่าแมพ */}
+          <div className="sbox">
+            <div className="sh">🗺️ ตั้งค่าแผนที่</div>
+
+            <div className="mc-help">
+              แผนที่ขนาด <b>13 × 11 = 143 ช่อง</b> · ปรับได้ว่าจะให้มีภูมิประเทศแต่ละแบบมาก/น้อยแค่ไหน
+              และมีสถานที่พิเศษกี่จุด
+            </div>
+
+            <label className="mc-toggle">
+              <input type="checkbox" checked={mapCfg.random}
+                onChange={e => setMapCfg(c => ({ ...c, random: e.target.checked }))} />
+              🎲 สุ่มทุกอย่าง (ระบบสุ่มค่าทั้งหมดให้)
+            </label>
+
+            <div className={mapCfg.random ? "mc-disabled" : ""}>
+              <div style={{ fontSize: "12px", color: "var(--txt-m)", margin: "10px 0 4px", fontWeight: 600 }}>
+                ปริมาณภูมิประเทศ:
+              </div>
+              <div className="mc-note">
+                <b>น้อย</b> = พบราว ⅓ ของปกติ · <b>ปกติ</b> = สมดุล · <b>มาก</b> = พบบ่อยขึ้น ≈ 2 เท่า
+                <br />(ช่องที่เหลือเป็น “ที่ราบ” เสมอ — เดินง่ายที่สุด)
+              </div>
+              {Object.entries(TERRAIN_LABELS).map(([key, lbl]) => (
+                <div className="mc-row" key={key}>
+                  <span className="mc-label">{lbl}</span>
+                  <div className="seg">
+                    {AMT_LABELS.map((al, i) => (
+                      <button key={i}
+                        className={`seg-btn${(mapCfg.terrain[key] ?? 1) === i ? " on" : ""}`}
+                        onClick={() => setTerrainAmt(key, i)}>{al}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div style={{ fontSize: "12px", color: "var(--txt-m)", margin: "14px 0 4px", fontWeight: 600 }}>
+                สถานที่พิเศษบนแมพ:
+              </div>
+              <div className="mc-note">
+                จุดสำคัญ (วัง/บัลลังก์/หมู่บ้าน/ตลาด/ค่ายกบฏ/กระดานเควส) มี <b>6 จุดเสมอ</b>
+                <br /><b>น้อย</b> ≈ 12–14 จุด · <b>ปกติ</b> ≈ 18–20 จุด · <b>มาก</b> = ครบทุกจุด (สูงสุด 24)
+              </div>
+              <div className="mc-row">
+                <span className="mc-label">🏰 จำนวนสถานที่พิเศษ</span>
+                <div className="seg">
+                  {DENSITY_LABELS.map((dl, i) => (
+                    <button key={i}
+                      className={`seg-btn${(mapCfg.zoneDensity ?? 1) === i ? " on" : ""}`}
+                      onClick={() => setMapCfg(c => ({ ...c, zoneDensity: i }))}>{dl}</button>
+                  ))}
+                </div>
+              </div>
+              {(() => {
+                const z = zoneCountEstimate(mapCfg);
+                return (
+                  <div className="mc-count">
+                    ▸ คาดว่าจะมี ≈ <b>{z.expected} จุด</b> (สูงสุด {z.max} จุด)
+                  </div>
+                );
+              })()}
+
+              <label className="mc-toggle" style={{ marginTop: "12px" }}>
+                <input type="checkbox" checked={mapCfg.dangerZones}
+                  onChange={e => setMapCfg(c => ({ ...c, dangerZones: e.target.checked }))} />
+                ⚠️ มีโซนอันตราย — 6 แห่ง (ถ้ำ/ภูเขาไฟ/ดันเจี้ยน/ซากปรักหักพัง/ป่าดำ/สุสาน)
+              </label>
+              <label className="mc-toggle">
+                <input type="checkbox" checked={mapCfg.shops}
+                  onChange={e => setMapCfg(c => ({ ...c, shops: e.target.checked }))} />
+                🛒 มีร้านค้า — 4 ร้าน (ช่างตีเหล็ก/ร้านเวทย์/โรงเตี๊ยม/คลังอาวุธ)
+              </label>
+            </div>
+
+            <div className="mc-summary">
+              <b>สรุป:</b> {(mapCfgSummary(mapCfg) || []).join(" · ")}
+            </div>
+          </div>
+          </div>{/* /create-cols */}
 
           <div style={{ textAlign: "center", marginTop: "8px" }}>
             <button className="btn b-gold" onClick={createRoom} disabled={!newName.trim() || wsStatus !== "ok"}>
@@ -594,7 +814,7 @@ export default function ShadowThrone() {
               ) : (
                 rooms.map(r => (
                   <div className="room-card" key={r.code} onClick={() => {
-                    setJoinModal({ code: r.code, hostName: r.hostName || "Host", mode: r.mode, players: r.players.length, maxPlayers: r.maxPlayers });
+                    setJoinModal({ code: r.code, hostName: r.hostName || "Host", mode: r.mode, players: r.players.length, maxPlayers: r.maxPlayers, mapConfig: r.mapConfig });
                     setJoinModalName("");
                   }}>
                     <div className="rc-code">{r.code}</div>
@@ -698,7 +918,7 @@ export default function ShadowThrone() {
                   {Array.from({ length: room.maxPlayers }).map((_, i) => {
                     const p = room.players[i];
                     const isMe = p && p.name === myName;
-                    const cls = p?.class ? CLASSES[p.class] : null;
+                    const cls = p?.charId ? CHARACTERS[p.charId] : (p?.class ? CHARACTERS[p.class] : null);
                     if (!p) return (
                       <div key={i} className="slot empty">
                         <div className="sn" style={{ color: "var(--txt-d)" }}>รอผู้เล่น...</div>
@@ -706,13 +926,13 @@ export default function ShadowThrone() {
                     );
                     return (
                       <div key={i} className={`slot filled${p.ready ? " ready-s" : ""}${i === 0 ? " host-s" : ""}`}>
-                        <div className="sn">
-                          {cls?.ico || "🧑"} {p.name}
+                        <div className="sn" style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                          <CharIcon ch={cls} size={22} /> {p.name}
                           {isMe && <span className="tag tag-you">คุณ</span>}
                           {i === 0 && <span className="tag tag-host">Host</span>}
                           {p.ready && <span className="tag tag-ready">✓</span>}
                         </div>
-                        <div className="sc">{cls ? cls.name : "ยังไม่เลือกอาชีพ"}</div>
+                        <div className="sc">{cls ? cls.name : (p.ready || p.host ? "พร้อมแล้ว ✓" : "รอกดพร้อม...")}</div>
                         {isHost && !isMe && (
                           <button className="b-danger" style={{ fontSize: "10px", padding: "2px 8px", marginTop: "4px" }}
                             onClick={() => kickPlayer(i)}>✕ Kick</button>
@@ -723,28 +943,26 @@ export default function ShadowThrone() {
                 </div>
               </div>
 
-              {/* Class selection */}
+              {/* Map settings — ข้อมูลการตั้งค่าแมพ (โชว์ให้ผู้เล่นทุกคนเห็น) */}
+              {room.mapConfig && (
+                <div className="sbox">
+                  <div className="sh">🗺️ ตั้งค่าแผนที่</div>
+                  <div className="mc-summary" style={{ marginTop: 0 }}>
+                    {(mapCfgSummary(room.mapConfig) || []).map((line, i) => (
+                      <div key={i}>{line}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Flow note — ลำดับการเริ่มเกมแบบใหม่ */}
               <div className="sbox">
-                <div className="sh">⚔ เลือกอาชีพของคุณ</div>
-                <div className="cgrid">
-                  {Object.values(CLASSES).map(cls => (
-                    <div key={cls.id} className={`ccard${myClass === cls.id ? " sel" : ""}`} onClick={() => pickClass(cls.id)}>
-                      <div className="ci">{cls.ico}</div>
-                      <div className="cn">{cls.name}</div>
-                      <div className="ce">{cls.evo}</div>
-                      <div className="cst">
-                        <span className="cs">STR {cls.s.STR}</span>
-                        <span className="cs">DEX {cls.s.DEX}</span>
-                        <span className="cs">VIT {cls.s.VIT}</span>
-                        <span className="cs">INT {cls.s.INT}</span>
-                      </div>
-                      <div style={{ fontSize: "9px", color: "var(--txt-m)", margin: "3px 0 4px" }}>
-                        ❤ {cls.hp} &nbsp; 💧 {cls.mana} &nbsp; 🗺 {cls.move}
-                      </div>
-                      <div className="cab">⚡ {cls.ability}</div>
-                      <div className="cpas">🟢 {cls.passive}</div>
-                    </div>
-                  ))}
+                <div className="sh">📜 ลำดับการเริ่มเกม</div>
+                <div className="flow-steps">
+                  <div className="flow-step"><span className="fs-no">1</span><div><b>กดพร้อม</b> — รอทุกคนในห้องพร้อม</div></div>
+                  <div className="flow-step"><span className="fs-no">2</span><div><b>สุ่มบทบาทลับ</b> — เปิดดูบทบาทของคุณ (👑/⚔️/🧑)</div></div>
+                  <div className="flow-step"><span className="fs-no">3</span><div><b>เลือกตัวละคร</b> — 👑 พระราชาเลือกก่อน จากนั้นคนอื่นเลือกพร้อมกัน</div></div>
+                  <div className="flow-step"><span className="fs-no">4</span><div><b>เข้าสู่สนาม</b> — เริ่มต่อสู้ชิงบัลลังก์!</div></div>
                 </div>
               </div>
 
@@ -756,9 +974,8 @@ export default function ShadowThrone() {
                     style={players.find(p => p.name === myName)?.ready
                       ? { background: "rgba(42,122,53,.3)", borderColor: "#2a7a35" } : {}}
                     onClick={toggleReady}
-                    disabled={!myClass}
                   >
-                    {players.find(p => p.name === myName)?.ready ? "✓ พร้อมแล้ว!" : "✓ พร้อมแล้ว"}
+                    {players.find(p => p.name === myName)?.ready ? "✓ พร้อมแล้ว!" : "✓ กดเพื่อพร้อม"}
                   </button>
                 )}
                 {isHost && (
@@ -767,11 +984,10 @@ export default function ShadowThrone() {
                     onClick={startGame}
                     disabled={!room || room.players.length < 3 || room.players.slice(1).some(p => !p.ready)}
                   >
-                    🎮 เริ่มเกม!
+                    🎮 เริ่มเกม! (สุ่มบทบาท)
                   </button>
                 )}
               </div>
-              {!myClass && <div className="pulse" style={{ marginTop: "8px" }}>เลือกอาชีพก่อนกดพร้อม</div>}
             </>
           )}
         </div>
@@ -789,7 +1005,7 @@ export default function ShadowThrone() {
             แตะไพ่เพื่อดูบทบาทลับของคุณ — ห้ามให้คนอื่นเห็น!
           </p>
 
-          <div className="warn-box">⚠ ทุกคนสามารถเปิดดูบทบาทพร้อมกัน เมื่อทุกคนกดยืนยันแล้ว เกมจะเริ่มทันที</div>
+          <div className="warn-box">⚠ ทุกคนเปิดดูบทบาทพร้อมกันได้ — เมื่อทุกคนยืนยันแล้ว จะเข้าสู่ขั้น <b>เลือกตัวละคร</b> (👑 พระราชาเลือกก่อน)</div>
 
           {/* Flip card */}
           <div className="flip-outer" onClick={() => !roleConfirmed && setFlipped(true)}>
@@ -853,6 +1069,168 @@ export default function ShadowThrone() {
           )}
         </div>
       </div>
+
+      {/* ═════════════ CHARACTER SELECT (หลังเปิดบทบาท) ═════════════ */}
+      {(() => {
+        const kingIdx = room?.roles ? room.roles.indexOf("king") : -1;
+        const kingPlayer = kingIdx >= 0 ? room?.players?.[kingIdx] : null;
+        const charReadyList = room?.charReady || [];
+        const iAmKing = myIdx >= 0 && myIdx === kingIdx;
+        // 👑 พระราชาต้อง "ยืนยัน" ตัวละครก่อน คนอื่นจึงเลือกได้
+        const kingConfirmed = !!(kingPlayer && charReadyList.includes(kingPlayer.name));
+        const canPick = iAmKing || kingConfirmed;
+        const myReady = charReadyList.includes(myName);
+        return (
+          <div id="cs" className={`screen${screen === "charselect" ? " on" : ""}`}>
+            <div className="cswrap">
+              <div className="cs-head">
+                <h2 className="cinzel" style={{ color: "var(--gold)", fontSize: "clamp(16px,3vw,22px)", margin: 0 }}>
+                  ⚔ เลือกตัวละคร
+                </h2>
+                {roleDef && (
+                  <div className="cs-role" style={{ borderColor: roleDef.color, color: roleDef.color }}>
+                    บทบาทของคุณ: {roleDef.ico} {roleDef.name}
+                  </div>
+                )}
+              </div>
+
+              {/* แถบสถานะลำดับการเลือก */}
+              <div className={`cs-banner${canPick ? " go" : " wait"}`}>
+                {iAmKing
+                  ? "👑 คุณคือพระราชา — เลือกแล้วกด \"ยืนยัน\" ก่อนใคร! เมื่อคุณยืนยันแล้วคนอื่นจึงเลือกได้"
+                  : kingConfirmed
+                    ? `👑 ${kingPlayer?.name || "พระราชา"} ยืนยันแล้ว — แย่งเลือกได้เลย ใครกดยืนยันก่อนได้ตัวนั้นไป!`
+                    : `⏳ รอพระราชา (${kingPlayer?.name || "—"}) ยืนยันตัวละครก่อน...`}
+              </div>
+
+              <div className="sbox" style={{ position: "relative" }}>
+                <div className="sh">เลือกตัวละครของคุณ {myClass ? "✓" : ""}</div>
+                <div className="cgrid">
+                  {Object.values(CHARACTERS).map(ch => {
+                    const others = (room?.players || []).filter(
+                      p => p && p.name !== myName && (p.charId === ch.id || p.class === ch.id)
+                    );
+                    // ล็อกจริงเฉพาะคนที่ "ยืนยันแล้ว" — ระหว่างยังไม่ยืนยันถือว่ายังแย่งกันได้
+                    const owner = others.find(p => charReadyList.includes(p.name));
+                    const eyeing = !owner && others[0]; // มีคนเล็งอยู่แต่ยังไม่ยืนยัน
+                    const taken = !!owner;
+                    const locked = taken || !canPick;
+                    return (
+                      <div key={ch.id}
+                        className={`ccard${myClass === ch.id ? " sel" : ""}${locked ? " taken" : ""}${eyeing ? " eyeing" : ""}`}
+                        onClick={() => {
+                          if (myReady) { showToast("คุณยืนยันตัวละครแล้ว"); return; }
+                          if (!canPick) { showToast("👑 รอพระราชายืนยันก่อน"); return; }
+                          if (taken) { showToast(`${ch.name} ถูก ${owner.name} ยืนยันแล้ว`); return; }
+                          pickClass(ch.id);
+                        }}
+                        style={{ borderColor: myClass === ch.id ? ch.color : undefined }}>
+                        {taken && <div className="ctaken">🔒 {owner.name}</div>}
+                        {eyeing && <div className="ctaken eye">👀 {eyeing.name} กำลังเล็ง</div>}
+                        <div className="ci" style={{ color: ch.color }}>
+                          <CharIcon ch={ch} size={92} round={false}
+                            style={{ margin: "0 auto", boxShadow: `0 2px 10px ${ch.color}55`, border: `1px solid ${ch.color}55` }} />
+                        </div>
+                        <div className="cn">{ch.name}</div>
+                        <div className="ce" style={{ color: ch.color }}>{ch.desc}</div>
+                        <div style={{ fontSize: "12px", color: "var(--txt)", margin: "5px 0 3px", display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap", fontWeight: 600 }}>
+                          <span>❤ {ch.hp}</span>
+                          <span>💧 {ch.mana}</span>
+                          <span>🗡 SPD {ch.move}</span>
+                          <span>⚔ {ch.atk}</span>
+                          <span>🛡 {ch.def}</span>
+                        </div>
+                        <div className="cab">🟡 {ch.active.name} (💧{ch.active.cost}) — {ch.active.desc}</div>
+                        <div className="cpas">🟢 {ch.passive.name} — {ch.passive.desc}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Confirm */}
+              <div style={{ textAlign: "center", marginTop: "6px" }}>
+                <button
+                  className="btn b-gold"
+                  onClick={confirmCharacter}
+                  disabled={!myClass || myReady}
+                  style={myReady ? { background: "rgba(42,122,53,.3)", borderColor: "#2a7a35" } : {}}>
+                  {myReady ? "✓ ยืนยันแล้ว — รอผู้เล่นอื่น..." : myClass ? "✓ ยืนยันตัวละครนี้" : "เลือกตัวละครก่อน"}
+                </button>
+              </div>
+
+              {/* ใครยืนยันแล้วบ้าง */}
+              <div style={{ marginTop: "14px", width: "100%", maxWidth: "420px", marginLeft: "auto", marginRight: "auto" }}>
+                <div style={{ fontSize: "11px", color: "var(--txt-m)", marginBottom: "6px", textAlign: "center" }}>
+                  ยืนยันแล้ว {charReadyList.length}/{players.length} คน
+                </div>
+                <div className="confirmed-row">
+                  {players.map((p, i) => {
+                    const done = charReadyList.includes(p.name);
+                    const picked = !!(p.charId || p.class);
+                    return (
+                      <div key={i} className={`conf-chip${done ? "" : " waiting"}`}>
+                        {done ? "✓" : picked ? "…" : "○"} {p.name}{i === kingIdx ? " 👑" : ""}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══════════ TRAITOR OFFER OVERLAY ═══════════ */}
+      {traitorOffer && screen === "gameboard" && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "rgba(0,0,0,.85)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "linear-gradient(160deg,#1a0a1a,#2a1040)",
+            border: "2px solid #8c4cc9",
+            borderRadius: "18px",
+            padding: "32px 40px",
+            maxWidth: "400px",
+            textAlign: "center",
+            boxShadow: "0 0 40px rgba(140,76,201,.4)",
+          }}>
+            <div style={{ fontSize: "48px", marginBottom: "8px" }}>🗡️</div>
+            <div style={{ fontFamily: "'Cinzel',serif", fontSize: "20px", color: "#8c4cc9", marginBottom: "6px" }}>
+              โอกาสแห่งการทรยศ
+            </div>
+            <div style={{ fontSize: "13px", color: "#d4b8f0", marginBottom: "16px", lineHeight: 1.7 }}>
+              พระราชาล้มแล้ว!<br />
+              คุณได้รับโอกาสลับ — กลายเป็น<br />
+              <span style={{ color: "#8c4cc9", fontWeight: 700 }}>คนทรยศ</span> และสู้เพื่อตัวเองคนเดียว<br />
+              <span style={{ fontSize: "11px", color: "#998" }}>(ปฏิเสธ → คุณแพ้ไปกับฝั่งพระราชา)</span>
+            </div>
+            <div style={{ fontSize: "22px", color: traitorOffer.countdown <= 10 ? "#e04040" : "#c9a84c", marginBottom: "20px", fontFamily: "'Cinzel',serif" }}>
+              ⏱ {traitorOffer.countdown} วินาที
+            </div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+              <button
+                onClick={() => respondTraitorOffer(true)}
+                style={{
+                  background: "linear-gradient(135deg,#4a1a6a,#8c4cc9)",
+                  border: "1px solid #8c4cc9", color: "#fff",
+                  padding: "12px 28px", borderRadius: "10px",
+                  fontFamily: "'Cinzel',serif", fontSize: "14px", cursor: "pointer",
+                }}>🗡️ ยอมรับ — ทรยศ!</button>
+              <button
+                onClick={() => respondTraitorOffer(false)}
+                style={{
+                  background: "rgba(255,255,255,.07)",
+                  border: "1px solid rgba(255,255,255,.2)", color: "#aaa",
+                  padding: "12px 28px", borderRadius: "10px",
+                  fontSize: "14px", cursor: "pointer",
+                }}>ปฏิเสธ</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═════════════ GAMEBOARD ═════════════ */}
       {/* ✅ FIX: แสดง overlay รอถ้ายังไม่พร้อม หรือ gameState ยังมาไม่ถึง (กันจอดำ) */}

@@ -1,9 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Sarabun:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Sarabun:wght@300;400;600;700&family=Ma+Shan+Zheng&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   --gold:#c9a84c;--gold-l:#f0d080;--gold-d:#6a4010;--gold-f:rgba(201,168,76,0.08);
   --stone:#0d0b08;--s2:#191510;--s3:#231f18;--s4:#2e2920;
   --txt:#e8d5b0;--txt-m:#7a6848;--txt-d:#3d3528;--r:10px;
+  /* ── San Guo Sha (三国杀) palette ── ink wash · vermillion · jade · navy · parchment */
+  --vermillion:#b22b20;--vermillion-l:#e0503a;--crimson:#7a1410;
+  --jade:#2e8b57;--jade-l:#4fb07a;
+  --navy:#1c2a4a;--navy-l:#37507e;
+  --parchment:#e8dcc0;--parchment-d:#cbb98c;
+  --ink:#070605;
+  /* dragon-tail corner flourish (gold linework) */
+  --corner:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='64' height='64'%3E%3Cg fill='none' stroke='%23c9a84c' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath d='M6 6 H30'/%3E%3Cpath d='M6 6 V30'/%3E%3Cpath d='M6 6 Q24 11 26 25 Q28 38 15 40 Q7 41 9 31'/%3E%3Ccircle cx='13' cy='31' r='1.8' fill='%23c9a84c' stroke='none'/%3E%3C/g%3E%3C/svg%3E");
+  /* faint dragon-scale (fish-scale) texture */
+  --scale:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='22' viewBox='0 0 44 22'%3E%3Cg fill='none' stroke='%23c9a84c' stroke-width='0.7' opacity='0.5'%3E%3Cpath d='M0 22 A11 11 0 0 1 22 22'/%3E%3Cpath d='M22 22 A11 11 0 0 1 44 22'/%3E%3Cpath d='M-11 11 A11 11 0 0 1 11 11'/%3E%3Cpath d='M11 11 A11 11 0 0 1 33 11'/%3E%3Cpath d='M33 11 A11 11 0 0 1 55 11'/%3E%3C/g%3E%3C/svg%3E");
 }
 body{background:var(--stone);color:var(--txt);font-family:'Sarabun',sans-serif;font-size:14px;overflow-x:hidden;min-height:100vh}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--gold-d);border-radius:2px}
@@ -124,17 +134,47 @@ input::placeholder{color:var(--txt-d)}
 .vis-nm{font-family:'Cinzel',serif;font-size:11px;color:var(--gold)}
 .vis-desc{font-size:9px;color:var(--txt-m);margin-top:2px;line-height:1.4}
  
+/* ── CREATE ROOM 2-คอลัมน์ (ตั้งค่าห้อง | ตั้งค่าแผนที่) ─────────── */
+.create-cols{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.create-cols>.sbox{flex:1 1 330px;min-width:300px;margin-bottom:0}
+
+/* ── MAP CONFIG (ตั้งค่าแมพตอนสร้างห้อง) ───────────────────────── */
+.mc-help{font-size:11.5px;color:var(--txt-m);line-height:1.6;background:rgba(201,168,76,.05);
+  border:1px solid rgba(201,168,76,.14);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.mc-note{font-size:11px;color:var(--txt-m);line-height:1.55;margin:2px 0 8px}
+.mc-count{font-size:12px;color:var(--gold-l);font-weight:600;margin-top:5px}
+.mc-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.mc-label{font-size:13px;color:var(--txt);flex-shrink:0}
+.seg{display:flex;gap:4px;background:rgba(0,0,0,.25);border-radius:8px;padding:3px}
+.seg-btn{border:1px solid transparent;background:transparent;color:var(--txt-m);
+  font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer;font-family:'Sarabun',sans-serif;transition:all .15s}
+.seg-btn:hover{color:var(--txt)}
+.seg-btn.on{background:var(--gold-f);border-color:var(--gold);color:var(--gold-l);font-weight:600}
+.mc-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer;margin-bottom:8px}
+.mc-toggle input{width:auto;flex:none;accent-color:var(--gold)}
+.mc-disabled{opacity:.42;pointer-events:none}
+.mc-summary{font-size:12px;color:var(--txt-m);line-height:1.7;background:rgba(201,168,76,.06);
+  border:1px solid rgba(201,168,76,.18);border-radius:8px;padding:8px 11px;margin-top:6px}
+.mc-summary b{color:var(--gold-l)}
+
 /* ── CLASS GRID ──────────────────────────────────────────────── */
 .cgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .ccard{background:var(--s4);border:1.5px solid rgba(201,168,76,.12);border-radius:10px;padding:12px 8px;cursor:pointer;transition:all .2s;text-align:center}
 .ccard:hover,.ccard.sel{border-color:var(--gold);background:var(--gold-f);transform:translateY(-2px)}
+/* ตัวละครที่ถูกผู้เล่นอื่นเลือกแล้ว */
+.ccard.taken{opacity:.42;filter:grayscale(.85);cursor:not-allowed}
+.ccard.taken:hover{transform:none;border-color:rgba(201,168,76,.12)}
+.ctaken{position:absolute;top:0;left:0;right:0;z-index:2;background:rgba(20,12,8,.92);
+  color:var(--gold-l);font-size:11px;font-weight:600;font-family:'Cinzel',serif;padding:4px 4px;
+  border-bottom:1px solid rgba(201,168,76,.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctaken.eye{background:rgba(8,18,30,.92);color:#7fc8ff;border-bottom-color:rgba(96,160,200,.4)}
 .ci{font-size:30px;margin-bottom:4px}
-.cn{font-family:'Cinzel',serif;font-size:11px;color:var(--gold);margin-bottom:3px}
-.ce{font-size:8px;color:var(--txt-d);margin-bottom:4px}
+.cn{font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:var(--gold);margin-bottom:4px}
+.ce{font-size:11px;color:var(--txt-m);margin-bottom:5px;line-height:1.4}
 .cst{display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-bottom:4px}
-.cs{font-size:8px;background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;color:var(--txt-m)}
-.cab{font-size:9px;color:rgba(201,168,76,.7);line-height:1.4;text-align:left}
-.cpas{font-size:8px;color:rgba(100,180,100,.7);line-height:1.3;margin-top:2px;text-align:left}
+.cs{font-size:11px;background:rgba(0,0,0,.3);padding:2px 6px;border-radius:3px;color:var(--txt)}
+.cab{font-size:12px;color:rgba(224,196,110,.92);line-height:1.5;text-align:left}
+.cpas{font-size:12px;color:rgba(120,210,120,.9);line-height:1.5;margin-top:4px;text-align:left}
  
 /* ── ROLE REVEAL ─────────────────────────────────────────────── */
 #rr{background:radial-gradient(ellipse at 50% 50%,#0d0a05,#040302);align-items:center;justify-content:center}
@@ -142,7 +182,8 @@ input::placeholder{color:var(--txt-d)}
 .flip-outer{perspective:700px;cursor:pointer;margin:16px 0}
 .flip{width:220px;height:310px;position:relative;transform-style:preserve-3d;transition:transform .65s cubic-bezier(.4,0,.2,1)}
 .flip.f{transform:rotateY(180deg)}
-.fback,.ffront{position:absolute;inset:0;border-radius:14px;backface-visibility:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;border:2px solid var(--gold-d)}
+.fback,.ffront{position:absolute;inset:0;border-radius:14px;backface-visibility:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:20px;border:2px solid var(--gold-d);overflow:hidden}
+.ffront{justify-content:flex-start;padding-top:26px}
 .fback{background:linear-gradient(160deg,var(--s3),var(--s2));
   background-image:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(201,168,76,.03) 8px,rgba(201,168,76,.03) 9px)}
 .fbglyph{font-size:64px;color:var(--gold-d);opacity:.4;animation:ps 2s ease-in-out infinite}
@@ -212,3 +253,159 @@ input::placeholder{color:var(--txt-d)}
 .nm-actions .btn{flex:1;padding:11px}
 .nm-cancel{background:rgba(255,255,255,.05);color:var(--txt-m);border:1px solid rgba(255,255,255,.1);border-radius:10px;cursor:pointer;font-family:'Sarabun',sans-serif;font-size:13px;padding:11px;flex:1;transition:all .15s}
 .nm-cancel:hover{background:rgba(255,255,255,.1)}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⚔ SAN GUO SHA (三国杀) THEME LAYER — ink wash · vermillion · jade · navy · gold
+   ทับธีมเดิม (กลิ่นอายบัลลังก์เงา) ด้วยศิลปะสามก๊ก: หมึกจีน ทอง ชาด หยก
+   ═══════════════════════════════════════════════════════════════════════════ */
+.mashan{font-family:'Ma Shan Zheng',cursive}
+
+/* ── ink-wash atmosphere over the whole app ── */
+body{
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(122,20,16,.20), transparent 55%),
+    radial-gradient(90% 60% at 85% 110%, rgba(28,42,74,.22), transparent 60%),
+    radial-gradient(70% 50% at 10% 90%, rgba(46,139,87,.10), transparent 60%),
+    var(--ink);
+}
+/* faint floating ink smoke */
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
+  background:
+    radial-gradient(40% 30% at 20% 30%, rgba(0,0,0,.5), transparent 70%),
+    radial-gradient(35% 28% at 80% 60%, rgba(0,0,0,.45), transparent 70%);}
+.screen{position:relative;z-index:1}
+
+/* helper: four dragon-tail corners on a framed panel */
+.sgs-corners{position:relative}
+.sgs-corners::before,.sgs-corners::after{content:'';position:absolute;width:34px;height:34px;
+  background:var(--corner) no-repeat center/contain;pointer-events:none;opacity:.85}
+.sgs-corners::before{top:5px;left:5px}
+.sgs-corners::after{top:5px;right:5px;transform:scaleX(-1)}
+
+/* ── TITLE SCREEN — rising vermillion sun over ink mountains ── */
+#t{background:
+    radial-gradient(circle 230px at 50% 30%, rgba(178,43,32,.45), rgba(178,43,32,.12) 55%, transparent 72%),
+    radial-gradient(ellipse 120% 80% at 50% 0%, #1a0f08, var(--ink) 70%);}
+#t::after{content:'';position:absolute;left:0;right:0;bottom:0;height:34%;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(60% 100% at 20% 100%, rgba(8,6,5,.95), transparent 70%),
+    radial-gradient(70% 100% at 55% 100%, rgba(10,7,5,.9), transparent 72%),
+    radial-gradient(60% 100% at 85% 100%, rgba(8,6,5,.95), transparent 70%);}
+.twrap{position:relative;z-index:2}
+/* big red seal stamp behind the crown — 影 (shadow) */
+.twrap::before{content:'影';position:absolute;top:-6px;left:50%;transform:translateX(-50%);
+  font-family:'Ma Shan Zheng',cursive;font-size:300px;line-height:1;color:rgba(178,43,32,.10);
+  z-index:-1;pointer-events:none;text-shadow:0 0 60px rgba(178,43,32,.25)}
+.crown{filter:drop-shadow(0 0 30px rgba(201,168,76,.6)) drop-shadow(0 0 12px rgba(178,43,32,.5))}
+.tmain{text-shadow:0 0 50px rgba(201,168,76,.4),0 0 22px rgba(178,43,32,.45),0 2px 8px rgba(0,0,0,.9)}
+.tsub{color:var(--gold-l);opacity:.8}
+.divl{background:linear-gradient(90deg,transparent,var(--vermillion-l),var(--gold),var(--vermillion-l),transparent);height:2px;
+  box-shadow:0 0 10px rgba(178,43,32,.4)}
+/* twin red seal marks flanking the divider */
+.divl::before,.divl::after{display:none}
+
+/* main menu cards → parchment plaques with dragon corners */
+.mcard{background:
+    var(--corner) no-repeat 6px 6px/26px,
+    linear-gradient(160deg,#241d12,#171108);
+  border:1px solid rgba(201,168,76,.28);box-shadow:inset 0 0 0 1px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.5)}
+.mcard:hover{border-color:var(--gold-l);background:
+    var(--corner) no-repeat 6px 6px/26px,
+    linear-gradient(160deg,#3a2a14,#241808);
+  box-shadow:0 10px 28px rgba(0,0,0,.6),0 0 18px rgba(201,168,76,.2)}
+.mnm{letter-spacing:.04em}
+
+/* ── PANELS (sbox) — silk plaque with gilt cloud header ── */
+.sbox{background:linear-gradient(165deg,#211c14,#15110b);border-color:rgba(201,168,76,.22);
+  box-shadow:inset 0 1px 0 rgba(201,168,76,.08),0 4px 16px rgba(0,0,0,.4);position:relative;overflow:hidden}
+.sbox::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--gold-d),var(--gold),var(--gold-d),transparent)}
+.sh{color:var(--gold-l)}
+.sh::after{background:repeating-linear-gradient(90deg,rgba(201,168,76,.25) 0 6px,transparent 6px 12px)}
+
+/* ── BUTTONS — imperial seal gold with vermillion edge ── */
+.b-gold{background:linear-gradient(135deg,#7a1410,#b22b20 35%,var(--gold) 100%);color:#1a0d05;
+  box-shadow:0 4px 18px rgba(178,43,32,.3),inset 0 1px 0 rgba(255,255,255,.25)}
+.b-gold:hover:not(:disabled){box-shadow:0 8px 30px rgba(201,168,76,.45),0 0 16px rgba(178,43,32,.4)}
+
+/* ── CLASS CARDS — warrior portraits on parchment, faction tint ── */
+.ccard{background:linear-gradient(165deg,#241d13,#16110a);border-color:rgba(201,168,76,.18);position:relative;overflow:hidden}
+.ccard::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.06;
+  background:var(--scale) repeat;background-size:30px 15px}
+.ccard:hover,.ccard.sel{border-color:var(--gold-l);background:linear-gradient(165deg,#3a2c16,#1e1509);
+  box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 14px rgba(201,168,76,.18)}
+.ci{filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))}
+
+/* ── ROOM LIST / TABS — lacquer tiles ── */
+.tab.on{background:linear-gradient(135deg,rgba(178,43,32,.18),var(--gold-f));border-color:var(--gold)}
+.room-card{background:linear-gradient(160deg,#211b13,#15100a);border-color:rgba(201,168,76,.2)}
+.room-card:hover{border-color:var(--gold-l);box-shadow:0 6px 18px rgba(0,0,0,.5)}
+
+/* ═══ ROLE REVEAL — premium San Guo Sha card ═══ */
+#rr{background:
+    radial-gradient(circle 280px at 50% 42%, rgba(178,43,32,.18), transparent 70%),
+    radial-gradient(ellipse at 50% 50%,#0c0805,#040302)}
+.flip{width:230px;height:330px}
+.fback,.ffront{border-width:2px;box-shadow:0 12px 40px rgba(0,0,0,.7)}
+/* CARD BACK — navy lacquer, gold dragon-knot frame, taiji + brush character */
+.fback{
+  background:
+    radial-gradient(circle 64px at 50% 38%, rgba(201,168,76,.10), transparent 70%),
+    linear-gradient(160deg,#1c2a4a,#0c1326 70%);
+  border-color:var(--gold);overflow:hidden}
+.fback::before{content:'';position:absolute;inset:7px;border:1px solid rgba(201,168,76,.45);border-radius:9px;
+  background:
+    var(--corner) no-repeat 2px 2px/30px,
+    var(--corner) no-repeat top right/30px;pointer-events:none}
+.fback::after{content:'';position:absolute;inset:7px;border-radius:9px;pointer-events:none;
+  background:
+    var(--corner) no-repeat bottom left/30px,
+    var(--corner) no-repeat bottom right/30px;transform:scaleY(-1)}
+/* taiji + brush character stacked via the existing glyph */
+.fbglyph{position:relative;z-index:1;font-size:0;width:88px;height:88px;border-radius:50%;
+  background:conic-gradient(from 0deg, #0c1326 0 50%, var(--gold) 50% 100%);
+  box-shadow:0 0 0 2px rgba(201,168,76,.6),0 0 24px rgba(201,168,76,.3);animation:ps 3s ease-in-out infinite;
+  display:flex;align-items:center;justify-content:center}
+.fbglyph::before{content:'';position:absolute;top:9px;left:50%;transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:var(--gold)}
+.fbglyph::after{content:'';position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:#0c1326}
+.fback p{position:relative;z-index:1;color:var(--gold-l)!important;font-family:'Cinzel',serif;letter-spacing:.12em}
+
+/* CARD FRONT — parchment scroll, faction color, seal corners */
+.ffront{overflow:hidden}
+.ffront::before{content:'';position:absolute;inset:6px;border:1px solid rgba(255,255,255,.18);border-radius:9px;pointer-events:none;
+  background:var(--corner) no-repeat 2px 2px/26px}
+.ffront::after{content:'';position:absolute;inset:6px;border-radius:9px;pointer-events:none;
+  background:var(--corner) no-repeat top right/26px;transform:scaleX(-1)}
+.ff-king{background:linear-gradient(160deg,#3a2600,#5a3c00),radial-gradient(circle at 50% 30%,rgba(240,208,128,.18),transparent 60%)}
+.ff-rebel{background:linear-gradient(160deg,#2a0c08,#52140e)}
+.ff-traitor{background:linear-gradient(160deg,#0c1226,#1e2848)}
+.ff-commoner{background:linear-gradient(160deg,#08220f,#10401f)}
+.fico{position:relative;z-index:1;filter:drop-shadow(0 4px 12px rgba(0,0,0,.7))}
+.fnm{position:relative;z-index:1;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.fwhy,.fwin{position:relative;z-index:1}
+
+/* ═══ LOBBY FLOW STEPS — ลำดับการเริ่มเกม ═══ */
+.flow-steps{display:flex;flex-direction:column;gap:8px}
+.flow-step{display:flex;align-items:flex-start;gap:10px;font-size:11.5px;color:var(--txt-m);line-height:1.5}
+.flow-step b{color:var(--gold-l)}
+.fs-no{flex-shrink:0;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:#1a0d05;background:linear-gradient(135deg,var(--gold-d),var(--gold));
+  font-family:'Cinzel',serif;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+
+/* ═══ CHARACTER SELECT SCREEN (หลังเปิดบทบาท) ═══ */
+/* เป็น scroll container ของตัวเอง — เนื้อหายาวเกินจอก็เลื่อนเมาส์ดูได้ */
+#cs{background:
+    radial-gradient(circle 320px at 50% 20%, rgba(201,168,76,.12), transparent 70%),
+    radial-gradient(ellipse at 50% 50%,#0c0805,#040302);
+  min-height:0;height:100dvh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.cswrap{max-width:760px;width:100%;margin:0 auto;padding:20px 16px 48px;
+  display:flex;flex-direction:column;gap:12px}
+.cs-head{text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:2px}
+.cs-role{font-size:14px;font-weight:600;font-family:'Cinzel',serif;padding:5px 16px;border-radius:20px;
+  border:1px solid;background:rgba(0,0,0,.35)}
+.cs-banner{font-size:14px;text-align:center;padding:11px 16px;border-radius:10px;line-height:1.6;
+  font-family:'Cinzel',serif;letter-spacing:.01em}
+.cs-banner.go{color:#7CFC7C;background:rgba(42,122,53,.16);border:1px solid rgba(76,201,76,.4)}
+.cs-banner.wait{color:#f0c060;background:rgba(200,120,0,.12);border:1px solid rgba(200,120,0,.35);
+  animation:csPulse 1.4s ease-in-out infinite}
+@keyframes csPulse{0%,100%{opacity:.7}50%{opacity:1}}

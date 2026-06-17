@@ -35,10 +35,30 @@ export function getNeighbors(col, row, cells) {
   const dirs = isOdd
     ? [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]]
     : [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]];
+  // ✅ เดินได้ทุกที่บนแมพ — น้ำผ่านได้ (มีต้นทุนเดินสูง) ไม่กรองน้ำออกอีกต่อไป
   return dirs
     .map(([dc, dr]) => cells.find(c => c.col === col + dc && c.row === row + dr))
-    .filter(Boolean)
-    .filter(c => c.terrain !== "water");
+    .filter(Boolean);
+}
+
+// คืน Map ของ key → ต้นทุนเดินที่ถูกที่สุดจาก startCell (ไม่จำกัดงบ)
+// ใช้สำหรับโชว์ "ต้องใช้กี่งบเดิน" เมื่อเอาเมาส์ชี้ช่อง
+export function getCostMap(startCell, cells, TERRAIN) {
+  const visited = new Map([[startCell.key, 0]]);
+  const queue = [startCell];
+  while (queue.length) {
+    const cell = queue.shift();
+    const base = visited.get(cell.key);
+    for (const n of getNeighbors(cell.col, cell.row, cells)) {
+      const moveCost = TERRAIN[n.terrain]?.moveCost ?? 1;
+      const nc = base + moveCost;
+      if (!visited.has(n.key) || visited.get(n.key) > nc) {
+        visited.set(n.key, nc);
+        queue.push(n); // re-push เมื่อเจอเส้นทางถูกกว่า → ได้ค่าที่สั้นที่สุดในที่สุด
+      }
+    }
+  }
+  return visited;
 }
 
 // ✅ แก้: รับ TERRAIN เป็น parameter แทน dynamic import

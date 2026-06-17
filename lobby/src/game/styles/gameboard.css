@@ -8,6 +8,12 @@
   --stone:#0a0908;--s2:#141210;--s3:#1e1b16;--s4:#28241c;--s5:#322d24;
   --txt:#e8d5b0;--txt-m:#7a6848;--txt-d:#3d3528;
   --green:#4cc94c;--red:#c94040;--blue:#4080c9;--purple:#8c4cc9;
+  /* ── San Guo Sha (三国杀) palette ── */
+  --vermillion:#b22b20;--vermillion-l:#e0503a;--crimson:#7a1410;
+  --jade:#2e8b57;--jade-l:#4fb07a;--navy:#1c2a4a;--navy-l:#37507e;
+  --parchment:#e8dcc0;--ink:#070605;
+  --corner:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='64' height='64'%3E%3Cg fill='none' stroke='%23c9a84c' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath d='M6 6 H30'/%3E%3Cpath d='M6 6 V30'/%3E%3Cpath d='M6 6 Q24 11 26 25 Q28 38 15 40 Q7 41 9 31'/%3E%3Ccircle cx='13' cy='31' r='1.8' fill='%23c9a84c' stroke='none'/%3E%3C/g%3E%3C/svg%3E");
+  --scale:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='22' viewBox='0 0 44 22'%3E%3Cg fill='none' stroke='%23c9a84c' stroke-width='0.7' opacity='0.5'%3E%3Cpath d='M0 22 A11 11 0 0 1 22 22'/%3E%3Cpath d='M22 22 A11 11 0 0 1 44 22'/%3E%3Cpath d='M-11 11 A11 11 0 0 1 11 11'/%3E%3Cpath d='M11 11 A11 11 0 0 1 33 11'/%3E%3Cpath d='M33 11 A11 11 0 0 1 55 11'/%3E%3C/g%3E%3C/svg%3E");
 }
 html,body,#root{width:100%;height:100%;overflow:hidden;background:var(--stone)}
 body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
@@ -183,3 +189,210 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 @keyframes deckPulse{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes cardFlipIn{0%{transform:rotateY(90deg) scale(.9);opacity:0}100%{transform:rotateY(0) scale(1);opacity:1}}
 .draw-deck.ready:hover{transform:translateY(-2px)}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⚔ SAN GUO SHA (三国杀) THEME — GAMEBOARD
+   ═══════════════════════════════════════════════════════════════════════════ */
+.map-area{background:
+    radial-gradient(80% 60% at 50% 40%, rgba(28,42,74,.12), transparent 70%),
+    radial-gradient(60% 50% at 50% 100%, rgba(122,20,16,.10), transparent 70%),
+    var(--ink)}
+/* battlefield smoke vignette over the hex map */
+.map-area::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:2;
+  box-shadow:inset 0 0 120px 40px rgba(7,6,5,.85)}
+.map-area>*{position:relative;z-index:1}
+
+/* ── TOP BAR — imperial silk banner ── */
+.top-bar{background:linear-gradient(180deg,#1d160e,#120d08);
+  border-bottom:2px solid transparent;
+  border-image:linear-gradient(90deg,transparent,var(--gold-d),var(--gold),var(--gold-d),transparent) 1;
+  box-shadow:0 2px 12px rgba(0,0,0,.5)}
+.tb-title{text-shadow:0 0 14px rgba(178,43,32,.5),0 1px 3px #000}
+.tb-title::after{content:'· 三国';font-family:'Cinzel',serif;font-size:10px;color:var(--vermillion-l);margin-left:6px;opacity:.7;letter-spacing:.1em}
+.tb-btn.primary{background:linear-gradient(135deg,#7a1410,#b22b20 40%,var(--gold));color:#1a0d05;
+  box-shadow:0 2px 10px rgba(178,43,32,.35),inset 0 1px 0 rgba(255,255,255,.25)}
+
+/* ── SIDE / BOTTOM PANELS — lacquer silk with gilt inner edge ── */
+.left-panel,.right-panel,.bottom-bar{background:linear-gradient(170deg,#171109,#0e0a06);
+  box-shadow:inset 0 0 0 1px rgba(201,168,76,.06)}
+.left-panel{border-right:1px solid rgba(201,168,76,.22)}
+.right-panel{border-right:1px solid rgba(201,168,76,.22)}
+.bottom-bar{border-top:2px solid transparent;
+  border-image:linear-gradient(90deg,transparent,var(--gold-d),var(--gold),var(--gold-d),transparent) 1}
+.sec-hdr{color:var(--gold-l)}
+.sec-hdr::after{background:repeating-linear-gradient(90deg,rgba(201,168,76,.25) 0 6px,transparent 6px 12px)}
+
+/* ── PLAYER CARDS — general portrait plaques ── */
+.pcard{background:linear-gradient(165deg,#1f1810,#14100a);border-color:rgba(201,168,76,.16)}
+.pcard:hover{border-color:rgba(201,168,76,.4);background:linear-gradient(165deg,#2a2013,#171109)}
+.pcard.active{background:
+    radial-gradient(120% 100% at 0% 0%,rgba(201,168,76,.12),transparent 60%),
+    linear-gradient(165deg,#2a2013,#171109);
+  box-shadow:0 0 14px rgba(201,168,76,.22),inset 0 0 0 1px rgba(201,168,76,.25)}
+.p-ico{background:radial-gradient(circle at 35% 30%,rgba(201,168,76,.25),rgba(0,0,0,.5));
+  box-shadow:0 0 0 1px rgba(201,168,76,.35)}
+
+/* ── ACTION BUTTONS — bronze war tokens ── */
+.act-btn{background:linear-gradient(165deg,#221a10,#15100a);border-color:rgba(201,168,76,.2)}
+.act-btn:hover:not(:disabled){border-color:var(--gold-l);background:linear-gradient(165deg,#352713,#1d1409);
+  box-shadow:0 4px 12px rgba(0,0,0,.5),0 0 10px rgba(201,168,76,.18)}
+.act-btn.active-mode{border-color:var(--gold);box-shadow:0 0 12px rgba(201,168,76,.3),inset 0 0 0 1px rgba(201,168,76,.3)}
+
+/* ── HAND CARDS — authentic San Guo Sha playing cards ── */
+.hand-card{min-width:74px;max-width:74px;padding:7px 6px;border-radius:9px;border-width:2px;
+  background:
+    linear-gradient(170deg,#efe4c6,#d8c69c 60%,#c9b487);
+  border-color:var(--gold-d);
+  box-shadow:0 4px 10px rgba(0,0,0,.5),inset 0 0 0 1px rgba(122,76,20,.35)}
+.hand-card::before{content:'';position:absolute;inset:3px;border:1px solid rgba(122,76,20,.45);border-radius:6px;pointer-events:none;
+  background:var(--corner) no-repeat 0 0/20px}
+.hand-card:hover{border-color:var(--gold);background:linear-gradient(170deg,#f6edd2,#e0cfa6 60%,#cdb88a);
+  box-shadow:0 12px 24px rgba(0,0,0,.55),0 0 16px rgba(201,168,76,.4);transform:translateY(-8px)}
+.hand-card.selected{border-color:var(--vermillion);background:linear-gradient(170deg,#f8efd6,#e6d6ad);
+  box-shadow:0 14px 26px rgba(178,43,32,.4),0 0 18px rgba(178,43,32,.45);transform:translateY(-12px)}
+.hand-card .card-ico{font-size:24px;margin-bottom:2px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
+.hand-card .card-nm{color:#6a3410;font-weight:700;text-shadow:0 1px 0 rgba(255,255,255,.4)}
+.hand-card .card-desc{color:#5a4a30}
+.hand-card>div[style]{color:#6a4a20!important}
+.hand-card .card-rarity{top:4px;right:4px;background:rgba(255,255,255,.35)!important;border-radius:3px}
+
+/* ── DRAW DECK — keep dark lacquer ── */
+.draw-deck{background:linear-gradient(135deg,#1c2a4a,#0c1326)!important}
+
+/* ── LOG — battle chronicle on dark silk ── */
+.log-entry.event{color:var(--gold-l)}
+.log-entry.dmg{color:var(--vermillion-l)}
+.log-entry.heal{color:var(--jade-l)}
+
+/* ── ROLE TAGS — faction seals ── */
+.tag-king{background:linear-gradient(135deg,rgba(201,168,76,.3),rgba(178,43,32,.15));color:var(--gold-l);box-shadow:inset 0 0 0 1px rgba(201,168,76,.4)}
+.tag-rebel{background:rgba(178,43,32,.28);color:#ff9a86;box-shadow:inset 0 0 0 1px rgba(178,43,32,.5)}
+.tag-traitor{background:rgba(55,80,126,.3);color:#9bb4e6;box-shadow:inset 0 0 0 1px rgba(55,80,126,.5)}
+.tag-commoner{background:rgba(46,139,87,.25);color:#7fe0a8;box-shadow:inset 0 0 0 1px rgba(46,139,87,.5)}
+
+/* ── EVENT BANNER + WIN — imperial proclamation ── */
+.event-banner{background:linear-gradient(180deg,rgba(29,22,14,.97),rgba(12,9,6,.97));
+  border:2px solid transparent;border-image:linear-gradient(135deg,var(--vermillion),var(--gold),var(--vermillion)) 1;
+  box-shadow:0 12px 40px rgba(0,0,0,.7),0 0 24px rgba(178,43,32,.3)}
+.event-banner .ev-name{text-shadow:0 0 12px rgba(178,43,32,.5)}
+.win-box{background:
+    radial-gradient(circle at 50% 0%,rgba(178,43,32,.2),transparent 60%),
+    linear-gradient(180deg,#1b140d,#0c0805);
+  border:2px solid transparent;border-image:linear-gradient(135deg,var(--gold),var(--vermillion),var(--gold)) 1;
+  box-shadow:0 20px 60px rgba(0,0,0,.8),0 0 30px rgba(201,168,76,.2)}
+.win-title{text-shadow:0 0 26px rgba(201,168,76,.5),0 0 14px rgba(178,43,32,.4)}
+
+/* ── PHASE DOTS — campaign progress ── */
+.phase-dot.current{background:radial-gradient(circle,rgba(201,168,76,.3),rgba(178,43,32,.12));
+  border-color:var(--gold);box-shadow:0 0 10px rgba(201,168,76,.4)}
+
+/* ═══ RULES MODAL — คู่มือการเล่น (ตกแต่งใหม่) ═══════════════════════════ */
+.rules-overlay{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
+  padding:16px;background:radial-gradient(circle at 50% 30%,rgba(40,28,8,.55),rgba(0,0,0,.86));
+  backdrop-filter:blur(3px);animation:rulesFade .25s ease-out}
+@keyframes rulesFade{from{opacity:0}to{opacity:1}}
+.rules-panel{position:relative;width:100%;max-width:680px;max-height:88vh;overflow:hidden;
+  display:flex;flex-direction:column;border-radius:18px;
+  background:linear-gradient(165deg,#1c150c,#0f0b06);
+  border:1px solid rgba(201,168,76,.35);
+  box-shadow:0 24px 70px rgba(0,0,0,.7),inset 0 0 0 1px rgba(201,168,76,.08),0 0 40px rgba(201,168,76,.12);
+  animation:rulesPop .3s cubic-bezier(.2,.8,.3,1.1)}
+@keyframes rulesPop{from{transform:scale(.94) translateY(10px);opacity:0}to{transform:none;opacity:1}}
+.rules-close{position:absolute;top:12px;right:12px;z-index:3;width:30px;height:30px;border-radius:50%;
+  background:rgba(0,0,0,.4);border:1px solid rgba(201,168,76,.3);color:var(--gold-l);font-size:14px;
+  cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center}
+.rules-close:hover{background:rgba(201,76,76,.3);border-color:#c94040;color:#fff;transform:rotate(90deg)}
+.rules-head{position:relative;text-align:center;padding:26px 20px 18px;
+  background:linear-gradient(180deg,rgba(201,168,76,.14),transparent);
+  border-bottom:1px solid rgba(201,168,76,.22)}
+.rules-head::after{content:'';position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);
+  width:160px;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.rules-crest{font-size:40px;filter:drop-shadow(0 4px 10px rgba(0,0,0,.6));margin-bottom:4px}
+.rules-title{font-family:'Cinzel',serif;color:var(--gold);font-size:22px;margin:0;letter-spacing:.04em;
+  text-shadow:0 0 18px rgba(201,168,76,.3)}
+.rules-sub{font-size:11px;color:var(--gold-l);letter-spacing:.18em;margin-top:2px;opacity:.85}
+.rules-tag{font-size:11px;color:var(--txt-m);margin-top:10px;line-height:1.6;max-width:440px;
+  margin-left:auto;margin-right:auto}
+.rules-body{padding:18px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.rules-body::-webkit-scrollbar{width:8px}
+.rules-body::-webkit-scrollbar-thumb{background:rgba(201,168,76,.3);border-radius:4px}
+.rules-sec{border:1px solid rgba(201,168,76,.16);border-radius:12px;overflow:hidden;
+  background:linear-gradient(160deg,rgba(255,255,255,.025),transparent);
+  border-left:3px solid var(--accent,#c9a84c);transition:border-color .18s,box-shadow .18s}
+.rules-sec:hover{border-color:color-mix(in srgb,var(--accent,#c9a84c) 55%,transparent);
+  box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.rules-sec-hd{display:flex;align-items:center;gap:9px;padding:11px 14px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--accent,#c9a84c) 20%,transparent),transparent);
+  border-bottom:1px solid rgba(201,168,76,.1)}
+.rules-sec-ico{font-size:19px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))}
+.rules-sec-name{font-size:14.5px;color:var(--accent,#c9a84c);font-weight:700;letter-spacing:.02em}
+.rules-items{padding:4px 15px 12px}
+.rule-item{padding:9px 0;border-bottom:1px dashed rgba(201,168,76,.12)}
+.rule-item:last-child{border-bottom:none}
+.rule-t{color:var(--gold);font-size:13px;font-weight:700;margin-bottom:4px;line-height:1.4}
+.rule-d{font-size:11.5px;color:#e8d5b0;line-height:1.72;opacity:.92}
+.rules-ok{flex-shrink:0;margin:0 20px 20px;padding:12px;border-radius:10px;cursor:pointer;
+  font-size:13px;letter-spacing:.05em;color:#1c150c;font-weight:700;border:none;
+  background:linear-gradient(180deg,#e8c84a,#c9a84c);
+  box-shadow:0 4px 14px rgba(201,168,76,.35),inset 0 1px 0 rgba(255,255,255,.4);transition:all .15s}
+.rules-ok:hover{filter:brightness(1.08);transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(201,168,76,.5),inset 0 1px 0 rgba(255,255,255,.4)}
+/* แถบหมวดกฎ (tabs) — อ่านทีละหมวด ไม่กองรวมกันจนพับอ่านไม่ออก */
+.rules-tabs{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px;
+  position:sticky;top:0;z-index:2;padding-bottom:2px}
+.rules-tab{display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  padding:7px 12px;border-radius:9px;font-size:12px;line-height:1;
+  background:rgba(255,255,255,.03);color:var(--txt-m);
+  border:1px solid rgba(201,168,76,.18);transition:all .14s}
+.rules-tab:hover{border-color:color-mix(in srgb,var(--accent,#c9a84c) 50%,transparent);color:#e8d5b0}
+.rules-tab.active{background:color-mix(in srgb,var(--accent,#c9a84c) 18%,transparent);
+  border-color:var(--accent,#c9a84c);color:var(--accent,#c9a84c);
+  box-shadow:0 2px 12px color-mix(in srgb,var(--accent,#c9a84c) 35%,transparent)}
+.rules-tab-ico{font-size:15px}
+.rules-tab-name{font-weight:700;letter-spacing:.01em}
+.rules-sec-open{animation:ruleSecIn .2s ease-out}
+@keyframes ruleSecIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* เนื้อหากฎ: เผื่อระยะอ่านง่าย ไม่อัดกันจนล้น */
+.rules-sec-open .rules-items{padding:6px 16px 14px}
+.rules-sec-open .rule-t{font-size:13.5px}
+.rules-sec-open .rule-d{font-size:12px;line-height:1.78}
+
+/* ═══ การ์ดเหตุการณ์ท้ายเฟส (modal กลางจอ) ═══ */
+.evcard-backdrop{position:fixed;inset:0;background:rgba(8,6,16,.72);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;z-index:1400;animation:evfade .2s ease}
+@keyframes evfade{from{opacity:0}to{opacity:1}}
+.evcard-modal{background:linear-gradient(160deg,#1c1730,#120e22);border:1px solid #c9a84c66;
+  border-radius:16px;padding:22px 26px;max-width:min(92vw,720px);box-shadow:0 18px 50px rgba(0,0,0,.6)}
+.evcard-title{color:var(--gold-l,#f0d080);font-weight:700;text-align:center;margin-bottom:16px;font-size:16px}
+.evcard-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.evcard{width:150px;background:linear-gradient(170deg,#2a2342,#1a1530);border:1px solid #8a7fd055;
+  border-radius:12px;padding:14px 12px;text-align:center;animation:evpop .4s cubic-bezier(.2,1.3,.5,1) both;
+  box-shadow:0 6px 18px rgba(0,0,0,.4)}
+@keyframes evpop{from{opacity:0;transform:translateY(18px) scale(.85)}to{opacity:1;transform:none}}
+.evcard-ico{font-size:34px;display:block;margin-bottom:6px}
+.evcard-name{color:#fff;font-weight:700;font-size:13px;margin-bottom:6px}
+.evcard-desc{color:#c8c0e0;font-size:11px;line-height:1.4}
+.evcard-close{margin:18px auto 0;display:block;padding:9px 28px;border:none;border-radius:9px;
+  background:linear-gradient(180deg,#d8b85a,#b8923a);color:#1a1208;font-weight:700;cursor:pointer}
+.evcard-close:hover{filter:brightness(1.08)}
+
+/* ═══ ระบบตอบโต้การโจมตี (interrupt) ═══ */
+.intr-backdrop{position:fixed;inset:0;background:rgba(20,4,4,.55);display:flex;align-items:center;
+  justify-content:center;z-index:1500;animation:evfade .15s ease}
+.intr-modal{background:linear-gradient(160deg,#3a1820,#221016);border:2px solid #e0506088;
+  border-radius:16px;padding:22px 28px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.7);
+  animation:evpop .3s cubic-bezier(.2,1.3,.5,1) both;max-width:min(92vw,420px)}
+.intr-title{color:#ff8a8a;font-weight:800;font-size:20px;margin-bottom:8px}
+.intr-sub{color:#fff;font-size:14px;margin-bottom:18px}
+.intr-cardico{font-size:20px;margin-right:6px}
+.intr-dmg{color:#ff9b6b;font-weight:700}
+.intr-actions{display:flex;flex-direction:column;gap:10px}
+.intr-btn{padding:11px 18px;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;
+  transition:all .12s}
+.intr-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.intr-btn.dodge{background:linear-gradient(180deg,#5ec8e0,#3a9ec0);color:#06222c}
+.intr-btn.block{background:linear-gradient(180deg,#c489ff,#9a5ce0);color:#1a0a2c}
+.intr-btn.take{background:linear-gradient(180deg,#a05050,#7a3838);color:#fff}
+.intr-wait{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:1500;
+  background:rgba(20,10,30,.92);border:1px solid #c9a84c55;border-radius:10px;padding:9px 18px;
+  color:#f0d080;font-size:13px;font-weight:600;animation:evfade .2s ease}

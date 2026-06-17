@@ -1,9 +1,10 @@
 // src/game/components/PlayerCard.jsx
-import { CLASSES } from "../constants/classes.js";
-import { ROLES }   from "../constants/roles.js";
+import { CHARACTERS } from "../constants/characters.js";
+import { ROLES }      from "../constants/roles.js";
+import CharIcon       from "./CharIcon.jsx";
 
 export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLeave }) {
-  const cls  = CLASSES[player.classId];
+  const cls  = CHARACTERS[player.charId] || CHARACTERS[player.classId];
   const role = ROLES[player.role];
   // บทบาทลับ: ถ้า server ซ่อนไว้ (role === "hidden") จะไม่มีใน ROLES → แสดง "ปริศนา"
   const roleLabel = role ? `${role.ico} ${role.name}` : "❓ ปริศนา";
@@ -15,8 +16,8 @@ export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLea
     >
       {isCurrentTurn && <div className="turn-indicator" />}
       <div className="p-head">
-        <div className="p-ico" style={{ background: cls?.color + "33", border: `1px solid ${cls?.color}60` }}>
-          {player.alive ? cls?.ico : "💀"}
+        <div className="p-ico" style={{ background: cls?.color + "33", border: `1px solid ${cls?.color}60`, overflow: "hidden", padding: 0 }}>
+          {player.alive ? <CharIcon ch={cls} size={28} /> : "💀"}
         </div>
         <div>
           <div className="p-name">{player.name}{isMe ? " (คุณ)" : ""}</div>
@@ -44,8 +45,10 @@ export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLea
       <div className="p-stats">
         <div className="p-stat"><span>ATK</span><span>{player.atk}</span></div>
         <div className="p-stat"><span>DEF</span><span>{player.def}</span></div>
-        <div className="p-stat"><span>SPD</span><span>{player.move}</span></div>
-        <div className="p-stat"><span>🎯</span><span>{player.range ?? 0}</span></div>
+        <div className="p-stat" title={player._spdCharge ? `ชาร์จความเร็ว +${player._spdCharge}` : "ความเร็ว (เพิ่มระยะโจมตี 2:1)"}>
+          <span>SPD</span><span>{player.move}{player._spdCharge ? " ⚡" : ""}</span>
+        </div>
+        <div className="p-stat" title="ระยะโจมตี"><span>🎯</span><span>{player.range ?? 0}</span></div>
       </div>
       {/* Equipment */}
       {player.equipment?.length > 0 && (
@@ -56,6 +59,13 @@ export default function PlayerCard({ player, isCurrentTurn, isMe, onHover, onLea
               {e.ico}
             </span>
           ))}
+        </div>
+      )}
+      {/* Passive skill name */}
+      {cls?.passive && (
+        <div style={{ fontSize: "9px", color: "var(--txt-d)", margin: "2px 0 0", opacity: 0.8 }}
+          title={cls.passive.desc}>
+          🟢 {cls.passive.name}
         </div>
       )}
       {/* Status effects */}
