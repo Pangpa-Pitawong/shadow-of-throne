@@ -3,9 +3,12 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
-  // GitHub Pages เสิร์ฟที่ https://<user>.github.io/shadow-of-throne/ → base ต้องเป็น /shadow-of-throne/
+  // ใช้ base แบบ "relative" (./) ตอน build → ทำงานได้ทุกที่ไม่ว่าเสิร์ฟที่รากหรือ subpath:
+  //   • Render Static (shadow-of-throne.onrender.com/)  → assets resolve เป็น /assets/...
+  //   • GitHub Pages (.../shadow-of-throne/)             → assets resolve เป็น /shadow-of-throne/assets/...
+  // (แอปนี้ไม่มี client-side routing แบบ nested path → relative base ปลอดภัย)
   // ตอน dev (vite --host) ใช้ '/' ปกติ
-  base: command === 'build' ? '/shadow-of-throne/' : '/',
+  base: command === 'build' ? './' : '/',
   plugins: [react()],
   server: {
     host: true,
