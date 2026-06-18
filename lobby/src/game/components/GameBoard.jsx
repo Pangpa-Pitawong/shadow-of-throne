@@ -12,8 +12,8 @@ import { hexToPixel, hexPoints, hexDistance, getReachable, getCostMap } from "..
 import TopBar from "./TopBar.jsx";
 import LeftPanel from "./LeftPanel.jsx";
 import RightPanel from "./RightPanel.jsx";
-import BottomBar from "./BottomBar.jsx";
 import HexMap3D from "./HexMap3D.jsx";
+import HandCard from "./HandCard.jsx";
 import WinScreen from "./overlays/WinScreen.jsx";
 import DiceAnimation from "./overlays/DiceAnimation.jsx";
 import EventBanner from "./overlays/EventBanner.jsx";
@@ -141,6 +141,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [statusSel, setStatusSel] = useState(null);     // index ผู้เล่นที่เลือกดูข้อมูลตัวละครในหมวดสถานะ
   const [showQuest, setShowQuest] = useState(false);   // อ่านเควสรองของตัวเองซ้ำ (ลับเฉพาะตัว)
   const [turnAnnounce, setTurnAnnounce] = useState(null);
+  const [showCards, setShowCards] = useState(false);  // card drawer open/close
   const [drawReveal, setDrawReveal] = useState(null); // { cards, flipped[] } — เปิดไพ่ที่จั่วได้
   const [drawSeen, setDrawSeen] = useState(false);     // เปิดไพ่ของเทิร์นนี้ดูแล้วหรือยัง
   const lastDrawKeyRef = useRef("");
@@ -346,6 +347,30 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     }
   }, [actionMode, isMyTurn, cells, players, currentTurn]);
 
+  // ── Auto-activate move mode when it becomes my turn ──
+  useEffect(() => {
+    if (isMyTurn && (actionsDone.moveLeft ?? 0) > 0) {
+      setActionMode("move");
+    } else if (!isMyTurn) {
+      setActionMode(null);
+      setShowCards(false);
+    }
+  }, [isMyTurn, currentTurn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Right-click on map → toggle attack mode ──
+  const handleMapContextMenu = useCallback((e) => {
+    e.preventDefault();
+    if (!isMyTurn) return;
+    if (actionMode === "attack") {
+      setActionMode((actionsDone.moveLeft ?? 0) > 0 ? "move" : null);
+      setAttackableCells([]);
+    } else if (!actionsDone.attacked) {
+      setSelectedCard(null);
+      setReachableCells([]);
+      setActionMode("attack");
+    }
+  }, [isMyTurn, actionMode, actionsDone]);
+
   // ── เปิดร้านค้าอัตโนมัติเมื่อเดินไปถึง (อ่าน shopItems จาก server state) ──
   const lastCellKeyRef = useRef(null);
   useEffect(() => {
@@ -541,8 +566,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
         {/* LEFT PANEL — Players */}
         <LeftPanel players={players} currentTurn={currentTurn} myIdx={myIdx} me={me} setTooltip={setTooltip} />
 
-        {/* RIGHT PANEL — Log (ด้านขวา) */}
-        <RightPanel log={log} />
+        {/* RIGHT PANEL — moved inside map-area as overlay */}
 
         {/* ── SKILL MODE BANNER — แสดงเมื่ออยู่ใน skill targeting mode ── */}
         {(actionMode === "skill" || actionMode === "king_skill") && isMyTurn && (
@@ -565,7 +589,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
         )}
 
         {/* MAP AREA — 2.5D Perspective Hex */}
-        <div className="map-area" ref={mapAreaRef}>
+        <div className="map-area" ref={mapAreaRef} onContextMenu={handleMapContextMenu}>
           <HexMap3D
             cells={cells}
             players={players}
@@ -685,79 +709,204 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
               pointerEvents: "none", zIndex: 10, animation: "slide-down .3s ease-out",
             }}>{turnAnnounce}</div>
           )}
-        </div>
 
-        {/* BOTTOM BAR */}
-        <BottomBar
-          me={me} isMyTurn={isMyTurn} currentPlayer={currentPlayer} phase={phase} maxPhases={maxPhases}
-          actionsDone={actionsDone} actionMode={actionMode} selectedCard={selectedCard}
-          onMove={() => {
-            if (!isMyTurn || (actionsDone.moveLeft ?? 0) <= 0) return;
-            setSelectedCard(null);
-            setAttackableCells([]);
-            setActionMode(prev => prev === "move" ? null : "move");
-          }}
-          onAttack={() => {
-            if (!isMyTurn || actionsDone.attacked) return;
-            setSelectedCard(null);
-            setReachableCells([]);
-            setActionMode(prev => prev === "attack" ? null : "attack");
-          }}
-          onUseCard={() => {
-            if (!selectedCard || !isMyTurn || (actionsDone.cardsPlayed || 0) >= 4) return;
-            const c = selectedCard;
-            // อาวุธ/เกราะ → สวมทันที ไม่ต้องเลือกช่อง
-            if (c.type === "weapon") {
-              onGameAction("use_card", { cardUid: c.uid });
-              setSelectedCard(null); setActionMode(null);
-              return;
-            }
-            // กับดัก → ต้องเลือกช่องวาง
-            if (c.type === "trap") { setActionMode(actionMode === "trap" ? null : "trap"); return; }
-            // เวทย์: self/team/none → ใช้ทันที | enemy/ally/tile → เลือกเป้าบนแมพ
-            const t = c.target || "enemy";
-            if (t === "self" || t === "team" || t === "none") {
-              onGameAction("use_card", { cardUid: c.uid });
-              setSelectedCard(null); setActionMode(null);
-              return;
-            }
-            // โจมตีหมู่: all/randomN/รัศมีรอบตัว → ใช้ทันที | line/รัศมีตามจุด → ต้องเลือกช่อง
-            if (t === "aoe") {
-              const needsTile = c.aoeMode === "line" || (c.aoeMode === "pointRadius" && c.byTile);
-              if (!needsTile) {
-                onGameAction("use_card", { cardUid: c.uid });
-                setSelectedCard(null); setActionMode(null);
-                return;
-              }
-            }
-            setActionMode(actionMode === "card" ? null : "card");
-          }}
-          onEndTurn={endTurn}
-          onSelectCard={card => { setSelectedCard(card); setActionMode(null); }}
-          setTooltip={setTooltip}
-          onDeckClick={reopenDraw}
-          deckReady={isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)}
-          onUseSkill={(skill) => {
-            // สกิลที่ใช้ทันที (ไม่ต้องเลือกเป้าหมาย)
-            const noTargetSkills = new Set(["open_route","blizzard","arrow_rain","self_heal","sword_wind","elixir","shout_command"]);
-            if (noTargetSkills.has(skill.id)) {
-              onGameAction("use_skill", {});
-            } else {
-              // สกิลต้องการเป้าหมาย — toggle skill targeting mode
-              setActionMode(prev => prev === "skill" ? null : "skill");
-              setSelectedCard(null);
-            }
-          }}
-          onUseKingSkill={(ks) => {
-            const noTargetKing = new Set(["drill_troops","royal_envoy","winter","royal_blessing","shadow_hunt","iron_fortress","fire_rain","immortal_potion","battle_pact"]);
-            if (noTargetKing.has(ks.id)) {
-              onGameAction("use_king_skill", {});
-            } else {
-              setActionMode(prev => prev === "king_skill" ? null : "king_skill");
-            }
-          }}
-        />
-      </div>
+          {/* ── RIGHT PANEL OVERLAY — log บนแมพโปร่งใส ── */}
+          <RightPanel log={log} />
+
+          {/* ── CARD DRAWER — slides from right ── */}
+          <div className={`card-drawer${showCards ? " open" : ""}`}>
+            <div className="card-drawer-inner">
+              <div className="drawer-title">
+                ไพ่ในมือ ({me?.hand?.length || 0}/{Math.min(10, Math.max(1, me?.hp || 1))})
+                {(actionsDone.cardsPlayed || 0) > 0 && (
+                  <span style={{ color: "var(--txt-m)", marginLeft: 6 }}>· ใช้แล้ว {actionsDone.cardsPlayed}/4</span>
+                )}
+              </div>
+              {/* กองจั่ว */}
+              <div className="drawer-deck-row">
+                <div
+                  className={`draw-deck${(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) ? " ready" : ""}`}
+                  onClick={() => (isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) && reopenDraw()}
+                  style={{ position:"relative", flexShrink:0, width:"44px", height:"62px", borderRadius:"7px",
+                    background:"linear-gradient(135deg,#1c2a4a,#0c1326)",
+                    border:`1px solid ${(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) ? "var(--gold)" : "rgba(201,168,76,.3)"}`,
+                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                    cursor:(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) ? "pointer" : "default" }}
+                >
+                  <span style={{ fontSize:"18px" }}>🂠</span>
+                  <span style={{ fontSize:"7px", color:"var(--gold-l)", marginTop:"1px" }}>กองจั่ว</span>
+                </div>
+                <div style={{ fontSize:"10px", color:"var(--txt-m)", lineHeight:1.6, marginLeft:6 }}>
+                  {me?.pendingDiscard > 0
+                    ? <span style={{ color:"#e05050" }}>⚠ ต้องทิ้ง {me.pendingDiscard} ใบ</span>
+                    : <span>ATK {me?.atk || 0} · DEF {me?.def || 0}<br/>💰 {me?.gold || 0} · งบ {actionsDone.moveLeft ?? 0}</span>}
+                </div>
+              </div>
+              {/* Hand cards */}
+              <div className="drawer-hand">
+                {me?.hand?.map((card, ci) => (
+                  <HandCard
+                    key={card.uid || ci}
+                    card={card}
+                    isSelected={selectedCard?.uid === card.uid}
+                    isMyTurn={isMyTurn}
+                    onSelect={card => {
+                      setSelectedCard(card);
+                      setActionMode(null);
+                    }}
+                    onHover={e => setTooltip({ x: e.clientX + 10, y: e.clientY - 80, title: card.name, desc: card.desc || "" })}
+                    onLeave={() => setTooltip(null)}
+                  />
+                ))}
+                {(!me?.hand || me.hand.length === 0) && (
+                  <div style={{ color:"var(--txt-d)", fontSize:"11px", padding:"8px" }}>ไม่มีการ์ดในมือ</div>
+                )}
+              </div>
+              {/* Use card button — shows when card selected */}
+              {selectedCard && isMyTurn && (
+                <div style={{ flexShrink:0, padding:"6px 0 2px" }}>
+                  <button
+                    className="tb-btn primary"
+                    style={{ width:"100%", fontSize:"11px", padding:"7px" }}
+                    disabled={(actionsDone.cardsPlayed || 0) >= 4}
+                    onClick={() => {
+                      const c = selectedCard;
+                      if (!c || !isMyTurn || (actionsDone.cardsPlayed || 0) >= 4) return;
+                      if (c.type === "weapon") {
+                        onGameAction("use_card", { cardUid: c.uid });
+                        setSelectedCard(null); setActionMode(null); setShowCards(false);
+                        return;
+                      }
+                      if (c.type === "trap") { setActionMode(actionMode === "trap" ? null : "trap"); setShowCards(false); return; }
+                      const t = c.target || "enemy";
+                      if (t === "self" || t === "team" || t === "none") {
+                        onGameAction("use_card", { cardUid: c.uid });
+                        setSelectedCard(null); setActionMode(null); setShowCards(false);
+                        return;
+                      }
+                      if (t === "aoe") {
+                        const needsTile = c.aoeMode === "line" || (c.aoeMode === "pointRadius" && c.byTile);
+                        if (!needsTile) {
+                          onGameAction("use_card", { cardUid: c.uid });
+                          setSelectedCard(null); setActionMode(null); setShowCards(false);
+                          return;
+                        }
+                      }
+                      setActionMode(actionMode === "card" ? null : "card");
+                      setShowCards(false);
+                    }}
+                  >
+                    🃏 ใช้ "{selectedCard.name}" ({actionsDone.cardsPlayed || 0}/4)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── RIGHT STRIP — icon buttons ── */}
+          {(() => {
+            const charDef = CHARACTERS[me?.charId] || CHARACTERS[me?.classId];
+            const activeCost = charDef?.active?.cost || 0;
+            const canUseSkill = isMyTurn && me && me.mana >= activeCost;
+            const isKing = me?.role === "king";
+            const isFateRead = charDef?.kingSkill?.id === "fate_read";
+            const kingSkillUsed = isFateRead ? !!me?._fateReadUsed : (me?._kingSkillUsedPhase === phase);
+            const handCount = me?.hand?.length || 0;
+            const handLimit = Math.min(10, Math.max(1, me?.hp || 1));
+            const deckReady = isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0);
+            return (
+              <div className="right-strip">
+                {/* Mode hint */}
+                {isMyTurn && actionMode === "move" && (
+                  <div style={{ fontSize:"7px", color:"#7cfc7c", textAlign:"center", lineHeight:1.5, padding:"0 3px" }}>🚶เดิน<br/>ช่องเขียว</div>
+                )}
+                {isMyTurn && actionMode === "attack" && (
+                  <div style={{ fontSize:"7px", color:"#e08080", textAlign:"center", lineHeight:1.5, padding:"0 3px" }}>⚔️โจมตี<br/>ช่องแดง</div>
+                )}
+                {isMyTurn && actionMode === "card" && (
+                  <div style={{ fontSize:"7px", color:"#c9a84c", textAlign:"center", lineHeight:1.5, padding:"0 3px" }}>🃏เลือก<br/>เป้าหมาย</div>
+                )}
+                {!isMyTurn && (
+                  <div style={{ fontSize:"7px", color:"var(--txt-d)", textAlign:"center", lineHeight:1.5, padding:"0 3px" }}>รอตา<br/>{currentPlayer?.name?.slice(0,4)}</div>
+                )}
+
+                {/* Card drawer toggle */}
+                <div
+                  className={`strip-btn${showCards ? " active-mode" : ""}${deckReady ? " active-mode" : ""}`}
+                  onClick={() => setShowCards(v => !v)}
+                  title="ไพ่ในมือ"
+                >
+                  🃏
+                  <label>ไพ่</label>
+                  {handCount > 0 && (
+                    <span className="strip-badge">{handCount}</span>
+                  )}
+                  {deckReady && (
+                    <span className="strip-badge" style={{ background:"#4cc94c", top:"-5px", left:"-5px", right:"auto" }}>!</span>
+                  )}
+                </div>
+
+                {/* Active skill */}
+                {charDef?.active && (
+                  <div
+                    className={`strip-btn${actionMode === "skill" ? " active-mode" : ""}${!canUseSkill ? " done" : ""}`}
+                    onClick={() => {
+                      if (!canUseSkill) return;
+                      const noTargetSkills = new Set(["open_route","blizzard","arrow_rain","self_heal","sword_wind","elixir","shout_command"]);
+                      if (noTargetSkills.has(charDef.active.id)) {
+                        onGameAction("use_skill", {});
+                      } else {
+                        setActionMode(prev => prev === "skill" ? (actionsDone.moveLeft > 0 ? "move" : null) : "skill");
+                        setSelectedCard(null);
+                        setShowCards(false);
+                      }
+                    }}
+                    title={`${charDef.active.name} — ${charDef.active.desc} (💧${activeCost})`}
+                  >
+                    {charDef.ico}
+                    <label>สกิล</label>
+                  </div>
+                )}
+
+                {/* King skill */}
+                {isKing && charDef?.kingSkill && (
+                  <div
+                    className={`strip-btn${actionMode === "king_skill" ? " active-mode" : ""}${kingSkillUsed || !isMyTurn ? " done" : ""}`}
+                    onClick={() => {
+                      if (!isMyTurn || kingSkillUsed) return;
+                      const noTargetKing = new Set(["drill_troops","royal_envoy","winter","royal_blessing","shadow_hunt","iron_fortress","fire_rain","immortal_potion","battle_pact"]);
+                      if (noTargetKing.has(charDef.kingSkill.id)) {
+                        onGameAction("use_king_skill", {});
+                      } else {
+                        setActionMode(prev => prev === "king_skill" ? (actionsDone.moveLeft > 0 ? "move" : null) : "king_skill");
+                        setShowCards(false);
+                      }
+                    }}
+                    title={`${charDef.kingSkill.name} — ${charDef.kingSkill.desc}`}
+                    style={{ borderColor: kingSkillUsed ? "rgba(201,168,76,.1)" : actionMode === "king_skill" ? "#a060e0" : "rgba(201,168,76,.22)" }}
+                  >
+                    👑
+                    <label>ราชา</label>
+                  </div>
+                )}
+
+                <div className="strip-spacer" />
+
+                {/* Stats */}
+                <div className="strip-stat">เฟส<span>{phase}/{maxPhases}</span></div>
+                <div className="strip-stat">💰<span>{me?.gold || 0}</span></div>
+                <div className="strip-stat">💧<span>{me?.mana ?? 0}/{me?.maxMana ?? 0}</span></div>
+
+                {/* End turn */}
+                {isMyTurn
+                  ? <button className="strip-end-btn" onClick={endTurn}>⏭<br/>จบ</button>
+                  : <div className="strip-wait">รอ...</div>
+                }
+              </div>
+            );
+          })()}
+        </div>
+      </div>{/* end .game-root */}
 
       <DiceAnimation roll={showDice} />
       <EventBanner event={activeEvent} />
