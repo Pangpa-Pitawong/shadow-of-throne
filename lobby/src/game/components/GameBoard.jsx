@@ -349,9 +349,13 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
   // ── Auto-activate move mode when it becomes my turn ──
   useEffect(() => {
-    if (isMyTurn && (actionsDone.moveLeft ?? 0) > 0) {
-      setActionMode("move");
-    } else if (!isMyTurn) {
+    if (isMyTurn) {
+      // เมื่อถึงตา — เปิด move mode อัตโนมัติ (ถ้ายังมีงบเดิน)
+      setActionMode(prev => {
+        if (prev === "skill" || prev === "king_skill" || prev === "card" || prev === "trap") return prev;
+        return (actionsDone.moveLeft ?? 0) > 0 ? "move" : null;
+      });
+    } else {
       setActionMode(null);
       setShowCards(false);
     }
@@ -678,7 +682,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
           {/* ── Compass / Help ── */}
           <div style={{
-            position: "absolute", bottom: 12, right: 12,
+            position: "absolute", bottom: 12, right: 56,
             background: "rgba(13,11,8,.85)", border: "1px solid rgba(201,168,76,.3)",
             borderRadius: "8px", padding: "6px 10px", fontSize: "10px",
             color: "var(--txt-m)", lineHeight: "1.6", pointerEvents: "none",
@@ -692,7 +696,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
           {/* ── Zoom ── */}
           <div style={{
-            position: "absolute", top: 8, right: 8,
+            position: "absolute", top: 8, right: 56,
             background: "rgba(13,11,8,.7)", border: "1px solid rgba(201,168,76,.2)",
             borderRadius: "6px", padding: "3px 8px", fontSize: "10px",
             color: "var(--txt-m)", pointerEvents: "none",
