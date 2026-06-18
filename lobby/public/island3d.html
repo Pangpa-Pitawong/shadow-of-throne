@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shadow of Throne — เกาะ 3D (Geo Pack + Ultimate Fantasy)</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a1422;overflow:hidden;font-family:system-ui,monospace;color:#dbe4f0}
+  #app{position:fixed;inset:0}
+  #load{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;
+        background:#0a1422;z-index:20;transition:opacity .5s}
+  #load .bar{width:240px;height:6px;background:#1c2740;border-radius:3px;overflow:hidden}
+  #load .fill{height:100%;width:0;background:linear-gradient(90deg,#7a2fb0,#b14de0);transition:width .2s}
+  #panel{position:fixed;top:12px;left:12px;z-index:10;background:rgba(14,20,34,.86);border:1px solid #283450;
+         border-radius:12px;padding:12px 14px;font-size:12px;line-height:1.9;backdrop-filter:blur(6px);max-width:230px}
+  #panel h1{font-size:13px;margin:0 0 8px;font-weight:600;letter-spacing:.3px}
+  #panel label{display:flex;align-items:center;gap:7px;cursor:pointer}
+  #panel input[type=range]{width:96px;accent-color:#b14de0}
+  #panel .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  #panel button{margin-top:8px;width:100%;background:#23304c;border:1px solid #38456a;color:#dbe4f0;
+         border-radius:7px;padding:6px;cursor:pointer;font:inherit}
+  #panel button:hover{background:#2c3a5c}
+  #hint{position:fixed;bottom:10px;left:12px;z-index:10;font-size:11px;color:#7e8aa5}
+  #legend{position:fixed;top:12px;right:12px;z-index:10;background:rgba(14,20,34,.86);border:1px solid #283450;
+          border-radius:12px;padding:10px 12px;font-size:11px;line-height:1.8;backdrop-filter:blur(6px)}
+  #legend b{font-weight:600}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="load"><div>กำลังโหลดโมเดล…</div><div class="bar"><div class="fill" id="fill"></div></div><div id="lpct" style="font-size:11px;color:#8a96b3">0%</div></div>
+
+<div id="panel">
+  <h1>⚔ map generator</h1>
+  <label><input type="checkbox" id="cForests" checked> forests</label>
+  <label><input type="checkbox" id="cMount" checked> highlands</label>
+  <label><input type="checkbox" id="cRivers" checked> rivers</label>
+  <label><input type="checkbox" id="cLava" checked> lava / volcano</label>
+  <div class="row"><span>resources</span><input type="range" id="sRes" min="0" max="1" step="0.1" value="0.6"></div>
+  <div class="row"><span>decor</span><input type="range" id="sDec" min="0" max="1" step="0.1" value="0.6"></div>
+  <button id="shuffle">⟳ shuffle map</button>
+</div>
+
+<div id="legend">
+  <div><b>biomes</b></div>
+  <div><span class="sw" style="background:#6aa844"></span>grassland (กลุ่ม NW)</div>
+  <div><span class="sw" style="background:#e3ecf2"></span>snow (NE)</div>
+  <div><span class="sw" style="background:#3f7a2c"></span>forest (SW)</div>
+  <div><span class="sw" style="background:#d2a85a"></span>desert / volcano (SE)</div>
+  <div><span class="sw" style="background:#3a2d4a"></span>shadow ring + throne (center)</div>
+  <div style="margin-top:6px"><b>contested-center PvP</b></div>
+  <div>4 ป้อมตามไบโอม → บุกเข้าชิง Shadow Throne</div>
+</div>
+
+<div id="hint">ลากเมาส์ = หมุนกล้อง · ล้อ = ซูม · คลิกขวาลาก = pan</div>
+
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+
+const COLS=30,ROWS=30,cx=14.5,cy=14.5,HSTEP=0.42,WATER_Y=0.24;
+let SEED=0;
+const opts={forests:true,mountains:true,rivers:true,lava:true,res:0.6,dec:0.6};
+const TC={sand:0xd9b26a,snowbeach:0xcfe0e8,grass:0x6aa844,snow:0xe3ecf2,forest:0x3f7a2c,desert:0xd2a85a,
+  hill:0x6f9a46,snowrock:0xb8c6d0,shadow:0x3a2d4a,throne:0x2b2638,lava:0xe0531f,lavarock:0x5b4636};
+
+const app=document.getElementById('app');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});
+renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+app.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0c1a2e);
+scene.fog=new THREE.Fog(0x0c1a2e,52,96);
+const clock=new THREE.Clock();
+
+let aspect=innerWidth/innerHeight,VD=21;
+const cam=new THREE.OrthographicCamera(-VD*aspect,VD*aspect,VD,-VD,0.1,300);
+cam.position.set(34,32,34);cam.lookAt(0,0,0);
+const controls=new OrbitControls(cam,renderer.domElement);
+controls.target.set(0,1.5,0);controls.enableDamping=true;controls.dampingFactor=0.08;
+controls.minZoom=0.5;controls.maxZoom=3.2;controls.maxPolarAngle=Math.PI*0.46;
+
+const sun=new THREE.DirectionalLight(0xfff1d4,2.4);
+sun.position.set(-22,30,16);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+const sc=sun.shadow.camera;sc.left=-24;sc.right=24;sc.top=24;sc.bottom=-24;sc.near=1;sc.far=90;
+sun.shadow.bias=-0.0004;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xbfd8ff,0x4a4232,0.5));
+scene.add(new THREE.AmbientLight(0xffffff,0.2));
+const throneGlow=new THREE.PointLight(0xc15ee8,0,18,1.6);scene.add(throneGlow);
+
+const ocean=new THREE.Mesh(
+  new THREE.PlaneGeometry(140,140,1,1),
+  new THREE.MeshStandardMaterial({color:0x216a8e,roughness:0.18,metalness:0.15,transparent:true,opacity:0.9}));
+ocean.rotation.x=-Math.PI/2;ocean.position.y=WATER_Y;ocean.receiveShadow=true;scene.add(ocean);
+const shallow=new THREE.Mesh(
+  new THREE.PlaneGeometry(140,140),
+  new THREE.MeshStandardMaterial({color:0x3a8fb0,roughness:0.4,transparent:true,opacity:0.45}));
+shallow.rotation.x=-Math.PI/2;shallow.position.y=WATER_Y-0.06;scene.add(shallow);
+
+const world=new THREE.Group();scene.add(world);
+let terrainMesh=null;const propGroup=new THREE.Group();world.add(propGroup);
+
+function hash(x,y){let n=Math.sin((x+SEED*7.3)*127.1+(y+SEED*3.1)*311.7)*43758.5453;return n-Math.floor(n);}
+function snoise(x,y){const x0=Math.floor(x),y0=Math.floor(y),fx=x-x0,fy=y-y0;const a=hash(x0,y0),b=hash(x0+1,y0),c=hash(x0,y0+1),d=hash(x0+1,y0+1);const ux=fx*fx*(3-2*fx),uy=fy*fy*(3-2*fy);return a*(1-ux)*(1-uy)+b*ux*(1-uy)+c*(1-ux)*uy+d*ux*uy;}
+function fbm(x,y){let v=0,a=0.5,f=1;for(let i=0;i<4;i++){v+=a*snoise(x*f,y*f);f*=2;a*=0.5;}return v;}
+function biomeOf(c,r){const left=c<r,top=(c+r)<29;return top?(left?'grass':'snow'):(left?'forest':'desert');}
+function dC(c,r){return Math.hypot(c-cx,r-cy);}
+
+let terr,hgt,roadOn;
+function gen(){
+  terr=[];hgt=[];
+  for(let r=0;r<ROWS;r++){const tr=[],hr=[];
+    for(let c=0;c<COLS;c++){
+      const dx=(c-cx)/12.6,dy=(r-cy)/13.4,dist=Math.sqrt(dx*dx+dy*dy);
+      const coast=dist+(fbm(c*0.22+5,r*0.22+9)-0.5)*0.5,d=dC(c,r),bm=biomeOf(c,r);
+      let t='water',h=0;
+      if(coast<1.0){
+        if(coast>0.87){t=bm==='snow'?'snowbeach':'sand';h=1;}
+        else if(d<3.4){t='throne';h=5+Math.round((3.4-d)*1.3);}
+        else if(d<5.6){t='shadow';h=3+Math.round((5.6-d)*0.6);}
+        else{const hi=d<9&&opts.mountains;
+          if(bm==='grass'){t=hi?'hill':'grass';h=hi?2:1;}
+          else if(bm==='snow'){t=hi?'snowrock':'snow';h=hi?2:1;}
+          else if(bm==='forest'){t='forest';h=hi?2:1;}
+          else{t='desert';h=hi?2:1;}
+        }
+      }
+      tr.push(t);hr.push(h);
+    }
+    terr.push(tr);hgt.push(hr);
+  }
+  if(!opts.forests)for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(terr[r][c]==='forest')terr[r][c]='grass';
+  if(opts.rivers)carve([[12,9],[14,5],[16,2]],'water');
+  if(opts.lava)carve([[16,16],[19,18],[22,21]],'lava');
+  pad(15,15,2,'throne',6);
+  [[6,11,'grass'],[11,6,'snow'],[11,23,'grass'],[23,11,'desert']].forEach(s=>pad(s[0],s[1],1,s[2],1));
+  roadOn=[];for(let r=0;r<ROWS;r++)roadOn.push(new Array(COLS).fill(false));
+  roads();
+}
+function rdSeg(a,b){for(let s=0;s<=90;s++){const t=s/90,c=Math.round(a[0]+(b[0]-a[0])*t),r=Math.round(a[1]+(b[1]-a[1])*t);if(r<0||r>=ROWS||c<0||c>=COLS)continue;if(dC(c,r)<4.6)continue;const t2=terr[r][c];if(t2==='throne'||t2==='shadow')continue;roadOn[r][c]=true;}}
+function roads(){[[6,11],[11,6],[11,23],[23,11]].forEach(k=>rdSeg(k,[15,15]));}
+function setT(c,r,t,h){if(r<0||r>=ROWS||c<0||c>=COLS)return;terr[r][c]=t;hgt[r][c]=h;}
+function pad(c0,r0,rad,t,h){for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++)if(Math.hypot(dr,dc)<=rad+0.3)setT(c0+dc,r0+dr,t,h);}
+function carve(P,t){for(let i=0;i<P.length-1;i++)for(let s=0;s<=24;s++){const k=s/24,c=P[i][0]+(P[i+1][0]-P[i][0])*k,r=P[i][1]+(P[i+1][1]-P[i][1])*k;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){const rr=Math.round(r+dr),cc=Math.round(c+dc);if(rr<0||rr>=ROWS||cc<0||cc>=COLS)continue;if(Math.hypot(r-rr,c-cc)<0.85){const cur=terr[rr][cc];if(cur!=='water'&&cur!=='throne'&&cur!=='shadow'){terr[rr][cc]=t;hgt[rr][cc]=t==='water'?0:1;}}}}}
+function Hat(c,r){return (r>=0&&r<ROWS&&c>=0&&c<COLS)?hgt[r][c]:0;}
+function topY(c,r){return Hat(c,r)*HSTEP;}
+
+function buildTerrain(){
+  if(terrainMesh){world.remove(terrainMesh);terrainMesh.geometry.dispose();}
+  let n=0;for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(terr[r][c]!=='water')n++;
+  const geo=new THREE.BoxGeometry(1,1,1);
+  const mat=new THREE.MeshStandardMaterial({roughness:0.92,metalness:0.0,flatShading:true});
+  const inst=new THREE.InstancedMesh(geo,mat,n);
+  inst.castShadow=true;inst.receiveShadow=true;
+  const m=new THREE.Matrix4(),col=new THREE.Color();let i=0;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const t=terr[r][c];if(t==='water')continue;
+    const hy=Math.max(0.3,hgt[r][c]*HSTEP);
+    m.makeScale(1.0,hy,1.0);m.setPosition(c-cx,hy/2,r-cy);
+    inst.setMatrixAt(i,m);
+    const base=TC[t]!==undefined?TC[t]:0x6aa844;
+    col.setHex(base);const v=(hash(c*1.3,r*1.7)-0.5)*0.08;col.offsetHSL(0,0,v);
+    if(t==='lava')col.setHex(0xe0531f);
+    if(roadOn[r][c]&&t!=='lava')col.setHex(0xb99a64);
+    inst.setColorAt(i,col);i++;
+  }
+  inst.instanceMatrix.needsUpdate=true;if(inst.instanceColor)inst.instanceColor.needsUpdate=true;
+  terrainMesh=inst;world.add(inst);
+}
+
+const NAMES={throne:'Wonder_SecondAge_Level3',keep:'TownCenter_FirstAge_Level2',
+  house1:'Houses_FirstAge_1_Level1',house2:'Houses_FirstAge_2_Level1',house3:'Houses_FirstAge_3_Level1',
+  watchtower:'WatchTower_FirstAge_Level2',walltower:'WallTowers_FirstAge',
+  market:'Market_FirstAge_Level1',farm:'Farm_FirstAge_Level2_Wheat',windmill:'Windmill_FirstAge',
+  port:'Port_FirstAge_Level1',mine:'Mine',temple:'Temple_FirstAge_Level2',
+  mountain:'Mountain_Single',mountainL:'MountainLarge_Single',
+  tree:'Resource_Tree_Group',tree1:'Resource_Tree1',pine:'Resource_PineTree_Group',
+  rock:'Resource_Rock_2',rockG:'Rock_Group',gold:'Resource_Gold_2',logs:'Logs'};
+const templates={};let GS=1;
+
+function prep(gltf){
+  const s=gltf.scene;
+  s.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material){o.material.roughness=0.85;}}});
+  const box=new THREE.Box3().setFromObject(s);const ctr=new THREE.Vector3();box.getCenter(ctr);
+  s.position.x-=ctr.x;s.position.z-=ctr.z;s.position.y-=box.min.y;
+  const g=new THREE.Group();g.add(s);
+  const sz=new THREE.Vector3();box.getSize(sz);g.userData.fp=Math.max(sz.x,sz.z);
+  return g;
+}
+function loadAll(onProg){
+  const loader=new GLTFLoader();const keys=Object.keys(NAMES);let done=0;
+  return Promise.all(keys.map(k=>new Promise((res,rej)=>{
+    loader.load(`/models/gltf/${NAMES[k]}.gltf`,gltf=>{templates[k]=prep(gltf);done++;onProg(done/keys.length);res();},
+      undefined,err=>{console.warn('miss',k,err);done++;onProg(done/keys.length);res();});
+  })));
+}
+
+let RNG=mulberry(1);
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+function place(key,c,r,o={}){
+  const t=templates[key];if(!t)return;
+  const cl=t.clone(true);
+  cl.scale.setScalar(GS*(o.scl||1));
+  cl.position.set(c-cx,topY(c,r)+(o.yoff||0),r-cy);
+  cl.rotation.y=o.rot!==undefined?o.rot:(o.free?RNG()*Math.PI*2:Math.floor(RNG()*4)*Math.PI/2);
+  if(o.tint){cl.traverse(m=>{if(m.isMesh){m.material=m.material.clone();m.material.color.multiplyScalar(0.5);m.material.color.lerp(new THREE.Color(o.tint),0.45);if(o.emissive){m.material.emissive=new THREE.Color(o.tint);m.material.emissiveIntensity=0.35;}}});}
+  else if(o.accent){cl.traverse(m=>{if(m.isMesh){m.material=m.material.clone();m.material.color.lerp(new THREE.Color(o.accent),0.32);}});}
+  propGroup.add(cl);
+}
+function banner(c,r,color){
+  const g=new THREE.Group();
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,3.0,6),new THREE.MeshStandardMaterial({color:0x3a2c1e,roughness:1}));
+  pole.position.y=1.5;pole.castShadow=true;
+  const flag=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.62,0.07),new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:0.45,roughness:0.6}));
+  flag.position.set(0.48,2.55,0);flag.castShadow=true;
+  g.add(pole,flag);
+  g.position.set(c-cx+0.55,topY(c,r),r-cy);
+  propGroup.add(g);
+}
+function nearestLand(c,r){let best=null,bd=99;for(let dr=-3;dr<=3;dr++)for(let dc=-3;dc<=3;dc++){const cc=c+dc,rr=r+dr;if(terr[rr]&&terr[rr][cc]&&terr[rr][cc]!=='water'){const d=Math.hypot(dr,dc);if(d<bd){bd=d;best=[cc,rr];}}}return best;}
+
+const bridgeMat=new THREE.MeshStandardMaterial({color:0x6e4d2c,roughness:0.95});
+function isOccupied(c,r,list){return list.some(p=>Math.abs(p[0]-c)<1&&Math.abs(p[1]-r)<1);}
+function buildProps(){
+  while(propGroup.children.length)propGroup.remove(propGroup.children[0]);
+  RNG=mulberry(SEED*9301+1);
+  place('throne',15,15,{scl:1.6,rot:0,tint:0x6a3aa0,emissive:1});
+  throneGlow.position.set(0,topY(15,15)+3.5,0);throneGlow.intensity=26;
+  const taken=[[15,15]];
+  const keeps=[[6,11,0x3aa655],[11,6,0x2f9bd8],[11,23,0x2f7a2c],[23,11,0xe07a2a]];
+  keeps.forEach(k=>{
+    place('keep',k[0],k[1],{scl:1.15,accent:k[2]});banner(k[0],k[1],k[2]);taken.push([k[0],k[1]]);
+    [[2,0],[-2,0],[0,2],[0,-2]].forEach((o,i)=>{const cc=k[0]+o[0],rr=k[1]+o[1];if(Hat(cc,rr)>0&&terr[rr]&&terr[rr][cc]!=='water'&&!roadOn[rr][cc]){place(['house1','house2','house3'][i%3],cc,rr,{scl:0.9});taken.push([cc,rr]);}});
+  });
+  const fixed=[['market',7,12,0.95],['windmill',8,9,0.95],['farm',5,13,1.0],['farm',4,9,1.0],['farm',6,8,1.0],
+    ['house1',8,13,0.9],['house2',4,12,0.9],['farm',22,9,1.0],['farm',24,8,1.0],
+    ['mine',12,7,0.95],['mine',21,18,0.95],['temple',18,14,0.95]];
+  fixed.forEach(f=>{if(Hat(f[1],f[2])>0&&terr[f[2]][f[1]]!=='water'){place(f[0],f[1],f[2],f[0]==='temple'?{scl:f[3],tint:0x7a4ab0}:{scl:f[3]});taken.push([f[1],f[2]]);}});
+  [[15,9],[9,15],[21,15],[15,21]].forEach(p=>{if(Hat(p[0],p[1])>0){place('watchtower',p[0],p[1],{scl:1.0});taken.push(p);}});
+  [[11,15],[19,15],[15,11],[15,19],[12,12],[18,18],[12,18],[18,12]].forEach(p=>{if(Hat(p[0],p[1])>0){place('walltower',p[0],p[1],{scl:0.85});taken.push(p);}});
+  [[3,11],[8,4],[8,26],[26,20]].forEach(p=>{const l=nearestLand(p[0],p[1]);if(l){place('port',l[0],l[1],{scl:1.0});taken.push(l);}});
+  for(let i=0;i<2;i++){place('mountainL',10+i*10,10+i*10,{scl:1.2,free:true});taken.push([10+i*10,10+i*10]);}
+
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const t=terr[r][c];
+    if(roadOn[r][c]&&t==='water'){const b=new THREE.Mesh(new THREE.BoxGeometry(1.15,0.14,1.15),bridgeMat);b.position.set(c-cx,WATER_Y+0.08,r-cy);b.castShadow=b.receiveShadow=true;propGroup.add(b);continue;}
+    if(t==='water'||t==='throne'||t==='lava'||roadOn[r][c])continue;
+    if(dC(c,r)<6.2)continue;
+    if(isOccupied(c,r,taken))continue;
+    const hv=hash(c*2.1+1,r*2.7+4);
+    if(t==='forest'){if(hv<0.55*opts.res+0.15)place(hv<0.4?'tree':'tree1',c,r,{free:true,scl:0.9});}
+    else if(t==='snow'){if(hv<0.3*opts.res)place('pine',c,r,{free:true,scl:0.9});}
+    else if(t==='snowrock'){if(hv<0.4*opts.dec)place('rock',c,r,{free:true,scl:0.9});}
+    else if(t==='hill'){if(hv<0.4*opts.dec)place(hv<0.2?'rockG':'rock',c,r,{free:true,scl:0.9});if(hv>0.9)place('rock',c,r,{free:true});}
+    else if(t==='grass'){if(hv<0.24*opts.dec)place(hv<0.12?'tree':'tree1',c,r,{free:true,scl:0.9});if(hv>0.94)place('gold',c,r,{free:true,scl:0.8});}
+    else if(t==='desert'){if(hv<0.14*opts.res)place('gold',c,r,{free:true,scl:0.85});if(hv>0.9)place('rockG',c,r,{free:true});}
+    else if(t==='shadow'){if(hv<0.25*opts.dec)place('rockG',c,r,{free:true,scl:0.9,tint:0x5a3a8a});}
+  }
+}
+
+function rebuild(){gen();buildTerrain();buildProps();}
+
+loadAll(p=>{document.getElementById('fill').style.width=(p*100)+'%';document.getElementById('lpct').textContent=Math.round(p*100)+'%';})
+.then(()=>{
+  if(templates.house1)GS=0.95/Math.max(0.4,templates.house1.userData.fp);
+  rebuild();
+  const ld=document.getElementById('load');ld.style.opacity=0;setTimeout(()=>ld.style.display='none',500);
+});
+
+addEventListener('resize',()=>{aspect=innerWidth/innerHeight;cam.left=-VD*aspect;cam.right=VD*aspect;cam.top=VD;cam.bottom=-VD;cam.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+const bind=(id,fn)=>document.getElementById(id).addEventListener('change',fn);
+bind('cForests',e=>{opts.forests=e.target.checked;rebuild();});
+bind('cMount',e=>{opts.mountains=e.target.checked;rebuild();});
+bind('cRivers',e=>{opts.rivers=e.target.checked;rebuild();});
+bind('cLava',e=>{opts.lava=e.target.checked;rebuild();});
+document.getElementById('sRes').addEventListener('input',e=>{opts.res=+e.target.value;buildProps();});
+document.getElementById('sDec').addEventListener('input',e=>{opts.dec=+e.target.value;buildProps();});
+document.getElementById('shuffle').addEventListener('click',()=>{SEED++;rebuild();});
+
+(function loop(){requestAnimationFrame(loop);const t=clock.getElapsedTime();
+  ocean.position.y=WATER_Y+Math.sin(t*0.8)*0.025;
+  if(throneGlow.intensity>0)throneGlow.intensity=24+Math.sin(t*2.3)*4;
+  controls.update();renderer.render(scene,cam);})();
+</script>
+</body>
+</html>

@@ -32,12 +32,20 @@ const DEFAULT_MAP_CFG = {
   dangerZones: true,
   shops: true,
 };
+// ขนาดแมพแบบพรีเซ็ต — medium = 13×11 (ขนาดเดิม, ไม่เปลี่ยนพฤติกรรม)
+const MAP_SIZES = {
+  small:  { cols: 11, rows: 9 },
+  medium: { cols: 13, rows: 11 },
+  large:  { cols: 15, rows: 13 },
+};
+
 function sanitizeMapConfig(cfg) {
   const c = cfg && typeof cfg === "object" ? cfg : {};
   const clampAmt = (v) => (v === 0 || v === 1 || v === 2 ? v : 1);
   const t = c.terrain && typeof c.terrain === "object" ? c.terrain : {};
   return {
     random: !!c.random,
+    size: MAP_SIZES[c.size] ? c.size : "medium",
     terrain: {
       forest: clampAmt(t.forest), mountain: clampAmt(t.mountain),
       desert: clampAmt(t.desert), swamp: clampAmt(t.swamp), water: clampAmt(t.water),
@@ -519,6 +527,9 @@ function createInitialGameState(room) {
     cfg.dangerZones = Math.random() < 0.8;
     cfg.shops = Math.random() < 0.85;
   }
+  // ── ขนาดแมพ (พรีเซ็ต) — medium = 13×11 (เท่าเดิมเป๊ะ) ──────────────────────
+  const { cols: COLS, rows: ROWS } = MAP_SIZES[cfg.size] || MAP_SIZES.medium;
+  const BASE_COLS = 13, BASE_ROWS = 11;
   // โซนหลักมีเสมอ · โซนอันตราย/ร้านค้าเปิด-ปิดได้ · โซนเสริมขึ้นกับความหนาแน่น
   const CORE_ZONES = new Set(["palace", "throne", "village", "market", "rebel_camp", "quest_board"]);
   const DANGER_ZONES = new Set(["cave", "volcano", "dungeon", "ruins", "dark_forest", "graveyard"]);
@@ -531,7 +542,7 @@ function createInitialGameState(room) {
     return Math.random() < densityP; // โซนเสริม (tower/shrine/treasure/farm/river/...)
   }
 
-  const FIXED_ZONES = {
+  const FIXED_ZONES_BASE = {
     "6,0": "palace", "6,1": "throne", "2,1": "village", "6,5": "market",
     "1,8": "rebel_camp", "4,5": "dark_forest", "9,2": "tower",
     "0,10": "shrine", "11,9": "cave",
@@ -541,6 +552,15 @@ function createInitialGameState(room) {
     "11,5": "ruins", "0,2": "watchtower", "3,7": "graveyard",
     "10,1": "volcano", "5,5": "portal", "12,8": "oasis",
   };
+  // สเกลตำแหน่งโซนคงที่ตามขนาดแมพ — medium (13×11) = identity (เหมือนเดิม)
+  // เกาะกลุ่มสำคัญ (palace/throne/market) จัดแนวกลางคอลัมน์เสมอ
+  const FIXED_ZONES = {};
+  for (const [k, zone] of Object.entries(FIXED_ZONES_BASE)) {
+    const [bc, br] = k.split(",").map(Number);
+    const nc = COLS === BASE_COLS ? bc : Math.round((bc / (BASE_COLS - 1)) * (COLS - 1));
+    const nr = ROWS === BASE_ROWS ? br : Math.round((br / (BASE_ROWS - 1)) * (ROWS - 1));
+    FIXED_ZONES[`${nc},${nr}`] = zone; // ย่อแมพอาจชนกัน → โซนหลังทับ (โซนน้อยลงตามขนาด)
+  }
   const ZONE_TERRAIN = {
     palace: "plains", throne: "plains", village: "plains", market: "plains",
     quest_board: "plains", treasure: "plains", river: "plains",
@@ -550,11 +570,12 @@ function createInitialGameState(room) {
     ruins: "mountain", armory: "mountain", watchtower: "mountain",
     shrine: "plains", oasis: "plains", portal: "plains", tower: "plains",
   };
+  const midC = Math.floor(COLS / 2), midR = Math.floor(ROWS / 2);
   const spawnPositions = [
-    { col: 0, row: 0 }, { col: 12, row: 0 },
-    { col: 0, row: 10 }, { col: 12, row: 10 },
-    { col: 6, row: 0 }, { col: 6, row: 10 },
-    { col: 0, row: 5 }, { col: 12, row: 5 }, // ผู้เล่นคนที่ 7–8
+    { col: 0, row: 0 }, { col: COLS - 1, row: 0 },
+    { col: 0, row: ROWS - 1 }, { col: COLS - 1, row: ROWS - 1 },
+    { col: midC, row: 0 }, { col: midC, row: ROWS - 1 },
+    { col: 0, row: midR }, { col: COLS - 1, row: midR }, // ผู้เล่นคนที่ 7–8
   ];
   const spawnKeys = new Set(spawnPositions.map(s => `${s.col},${s.row}`));
 
@@ -576,18 +597,20 @@ function createInitialGameState(room) {
   }
   // เริ่มจากที่ราบทั้งแมพ แล้วโปรย "ก้อนภูมิประเทศ" จำนวนหนึ่งแบบสุ่ม
   const terrainGrid = {};
-  for (let row = 0; row < 11; row++)
-    for (let col = 0; col < 13; col++) terrainGrid[`${col},${row}`] = "plains";
-  const blobCount = 14 + Math.floor(Math.random() * 6); // 14–19 ก้อนต่อเกม
+  for (let row = 0; row < ROWS; row++)
+    for (let col = 0; col < COLS; col++) terrainGrid[`${col},${row}`] = "plains";
+  // จำนวนก้อนภูมิประเทศสเกลตามพื้นที่แมพ (เดิม 14–19 ก้อนบน 143 ช่อง)
+  const blobBase = Math.round((14 + Math.floor(Math.random() * 6)) * (COLS * ROWS) / (BASE_COLS * BASE_ROWS));
+  const blobCount = Math.max(8, blobBase);
   for (let b = 0; b < blobCount; b++) {
     const t = weightedTerrain();
     if (t === "plains") continue;
-    const ccol = Math.floor(Math.random() * 13), crow = Math.floor(Math.random() * 11);
+    const ccol = Math.floor(Math.random() * COLS), crow = Math.floor(Math.random() * ROWS);
     const size = 1 + Math.floor(Math.random() * 4); // รัศมีก้อน
     for (let dr = -size; dr <= size; dr++) {
       for (let dc = -size; dc <= size; dc++) {
         const col = ccol + dc, row = crow + dr;
-        if (col < 0 || col > 12 || row < 0 || row > 10) continue;
+        if (col < 0 || col > COLS - 1 || row < 0 || row > ROWS - 1) continue;
         // ความน่าจะเป็นลดลงตามระยะจากศูนย์กลาง → ขอบก้อนขรุขระเป็นธรรมชาติ
         const dist = Math.abs(dc) + Math.abs(dr);
         if (Math.random() < 1 - dist / (size + 1.5)) terrainGrid[`${col},${row}`] = t;
@@ -598,8 +621,8 @@ function createInitialGameState(room) {
   const cells = [];
   const zoneToCell = {};
   const SHOP_ZONES = ["market", "blacksmith", "alchemist", "tavern", "armory"];
-  for (let row = 0; row < 11; row++) {
-    for (let col = 0; col < 13; col++) {
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
       const key = `${col},${row}`;
       const zoneCandidate = FIXED_ZONES[key] || null;
       const specialZone = (zoneCandidate && zoneEnabled(zoneCandidate)) ? zoneCandidate : null;
@@ -680,6 +703,9 @@ function createInitialGameState(room) {
   const gs = {
     players,
     cells,
+    mapCols: COLS,
+    mapRows: ROWS,
+    mapSize: cfg.size,
     turnOrder,
     turnPointer: 0,
     currentTurn: turnOrder[0] ?? 0,
@@ -2489,12 +2515,17 @@ setInterval(() => {
   if (cleaned) console.log(`Cleaned ${cleaned} stale room(s)`);
 }, 5 * 60 * 1000);
 
+// SOT_TEST=1 → import โมดูลเพื่อทดสอบฟังก์ชันโดยไม่เปิดพอร์ต/keep-alive
+if (!process.env.SOT_TEST) {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🏰 Shadow of Throne Server v5`);
   console.log(`   Port:      ${PORT}`);
   console.log(`   Features:  move=3, hand=HP-limit, dodge-dice, equipment-range, 8-phase, boss-mode, hidden-roles, fog, side-quests`);
   console.log(`   Health:    http://localhost:${PORT}/health\n`);
 });
+}
+
+export { createInitialGameState, sanitizeMapConfig, MAP_SIZES };
 
 // ─── Keep-alive (กัน Render free tier หลับหลังไม่มีคนใช้ ~15 นาที) ───────────────
 // Render ตั้ง RENDER_EXTERNAL_URL ให้อัตโนมัติ → self-ping /health ทุก 10 นาที

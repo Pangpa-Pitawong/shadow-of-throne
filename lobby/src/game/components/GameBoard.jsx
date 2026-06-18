@@ -12,7 +12,7 @@ import { hexToPixel, hexPoints, hexDistance, getReachable, getCostMap } from "..
 import TopBar from "./TopBar.jsx";
 import LeftPanel from "./LeftPanel.jsx";
 import RightPanel from "./RightPanel.jsx";
-import HexMap3D from "./HexMap3D.jsx";
+import IslandMap3D from "./IslandMap3D.jsx";
 import HandCard from "./HandCard.jsx";
 import WinScreen from "./overlays/WinScreen.jsx";
 import DiceAnimation from "./overlays/DiceAnimation.jsx";
@@ -90,6 +90,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [cells, setCells] = useState(() => serverGameState?.cells || []);
   const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [recenterTok, setRecenterTok] = useState(0); // กดปุ่มจัดกึ่งกลาง → รีเฟรมกล้อง 3D
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
   const mapAreaRef = useRef(null);
@@ -214,27 +215,8 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     return () => ro.disconnect();
   }, [centerMap]);
 
-  // Wheel zoom
-  useEffect(() => {
-    const el = mapAreaRef.current;
-    if (!el) return;
-    const onWheel = (e) => {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      const rect = el.getBoundingClientRect();
-      const cx = rect.width / 2, cy = rect.height / 2;
-      setZoom(prev => {
-        const next = Math.min(Math.max(prev * factor, 0.25), 2.5);
-        setMapOffset(p => ({
-          x: cx - (cx - p.x) * (next / prev),
-          y: cy - (cy - p.y) * (next / prev),
-        }));
-        return next;
-      });
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  // การซูม/หมุน/เลื่อนแมพ จัดการโดย OrbitControls ภายใน IslandMap3D (กล้อง 3D)
+  // — ไม่ต้องดัก wheel ที่นี่อีก (จะตีกับ OrbitControls)
 
   const me = players[myIdx];
   const currentPlayer = players[currentTurn];
@@ -559,7 +541,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           phase={phase} phaseStep={phaseStep} maxPhases={maxPhases}
           fogActive={fogActive} bossMode={bossMode} bossLevel={bossLevel}
           currentPlayer={currentPlayer} isMyTurn={isMyTurn}
-          onEndTurn={endTurn} onCenter={centerMap}
+          onEndTurn={endTurn} onCenter={() => setRecenterTok(n => n + 1)}
           onToggleRules={() => setShowRules(r => !r)}
           onToggleStatus={() => setShowStatus(s => { if (!s) setStatusSel(myIdx >= 0 ? myIdx : 0); return !s; })}
           onToggleQuest={() => setShowQuest(s => !s)}
@@ -594,7 +576,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
         {/* MAP AREA — 2.5D Perspective Hex */}
         <div className="map-area" ref={mapAreaRef} onContextMenu={handleMapContextMenu}>
-          <HexMap3D
+          <IslandMap3D
             cells={cells}
             players={players}
             myIdx={myIdx}
@@ -607,6 +589,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             pendingMove={pendingMove}
             zones={EXTENDED_SPECIAL_ZONES}
             categoryColors={CATEGORY_COLORS}
+            recenter={recenterTok}
             onCellClick={handleCellClick}
             onCellHover={(cell, cx, cy) => {
               const zoneData = EXTENDED_SPECIAL_ZONES[cell.specialZone];

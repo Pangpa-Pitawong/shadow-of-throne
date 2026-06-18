@@ -26,6 +26,14 @@ const TERRAIN_LABELS = {
 const AMT_LABELS = ["น้อย", "ปกติ", "มาก"];
 const DENSITY_LABELS = ["น้อย", "ปกติ", "มาก"];
 
+// ขนาดแมพแบบพรีเซ็ต — ต้องตรงกับ MAP_SIZES ใน server.js
+const MAP_SIZE_OPTS = [
+  { id: "small",  label: "เล็ก",  dims: "11 × 9",  cells: 99 },
+  { id: "medium", label: "กลาง", dims: "13 × 11", cells: 143 },
+  { id: "large",  label: "ใหญ่", dims: "15 × 13", cells: 195 },
+];
+const sizeMeta = (id) => MAP_SIZE_OPTS.find(s => s.id === id) || MAP_SIZE_OPTS[1];
+
 // จำนวนสถานที่พิเศษบนแมพ (ต้องตรงกับ logic ใน server.js createInitialGameState)
 //   โซนหลัก 6 (มีเสมอ) · อันตราย 6 · ร้านค้า 4 · เสริม 8 = สูงสุด 24 จุด
 const ZONE_GROUPS = { core: 6, danger: 6, shop: 4, extra: 8 };
@@ -44,8 +52,10 @@ function zoneCountEstimate(cfg) {
 // สรุปการตั้งค่าแมพเป็นข้อความสั้นๆ (โชว์ในล็อบบี้/หน้าเข้าร่วม)
 function mapCfgSummary(cfg) {
   if (!cfg) return null;
-  if (cfg.random) return ["🎲 ภูมิประเทศ: สุ่มทั้งหมด"];
-  const lines = [];
+  const sz = sizeMeta(cfg.size);
+  const sizeLine = `📐 ขนาด: ${sz.label} (${sz.dims})`;
+  if (cfg.random) return [sizeLine, "🎲 ภูมิประเทศ: สุ่มทั้งหมด"];
+  const lines = [sizeLine];
   const more = [], less = [];
   for (const [k, lbl] of Object.entries(TERRAIN_LABELS)) {
     const a = cfg.terrain?.[k] ?? 1;
@@ -106,6 +116,7 @@ export default function ShadowThrone() {
   // ── Map config (ตั้งค่าภูมิประเทศ/สถานที่ตอนสร้างห้อง) ─────────────────────
   const [mapCfg, setMapCfg] = useState({
     random: false,
+    size: "medium",
     terrain: { forest: 1, mountain: 1, desert: 1, swamp: 1, water: 1 },
     zoneDensity: 1,
     dangerZones: true,
@@ -747,11 +758,25 @@ export default function ShadowThrone() {
             <div className="sh">🗺️ ตั้งค่าแผนที่</div>
 
             <div className="mc-help">
-              แผนที่ขนาด <b>13 × 11 = 143 ช่อง</b> · ปรับได้ว่าจะให้มีภูมิประเทศแต่ละแบบมาก/น้อยแค่ไหน
+              เลือก <b>ขนาดแผนที่</b> · ปรับว่าจะให้มีภูมิประเทศแต่ละแบบมาก/น้อยแค่ไหน
               และมีสถานที่พิเศษกี่จุด
             </div>
 
-            <label className="mc-toggle">
+            <div className="mc-row">
+              <span className="mc-label">📐 ขนาดแผนที่</span>
+              <div className="seg">
+                {MAP_SIZE_OPTS.map(s => (
+                  <button key={s.id}
+                    className={`seg-btn${(mapCfg.size ?? "medium") === s.id ? " on" : ""}`}
+                    onClick={() => setMapCfg(c => ({ ...c, size: s.id }))}>{s.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="mc-count" style={{ marginTop: 0 }}>
+              ▸ {sizeMeta(mapCfg.size).label} — <b>{sizeMeta(mapCfg.size).dims} = {sizeMeta(mapCfg.size).cells} ช่อง</b>
+            </div>
+
+            <label className="mc-toggle" style={{ marginTop: "10px" }}>
               <input type="checkbox" checked={mapCfg.random}
                 onChange={e => setMapCfg(c => ({ ...c, random: e.target.checked }))} />
               🎲 สุ่มทุกอย่าง (ระบบสุ่มค่าทั้งหมดให้)

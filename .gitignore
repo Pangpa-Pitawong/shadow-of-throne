@@ -12,8 +12,8 @@ dist/
 /blender_*.py
 /generate-*.js
 
-# ── Generated / unused art assets (เกมไม่ได้ใช้ตอน runtime — แมพเป็น canvas 2.5D) ──
+# ── Generated / unused art assets ──
 /renders/
-/lobby/public/models/
 /lobby/public/models3d/
 /lobby/public/tiles/
+# หมายเหตุ: lobby/public/models/gltf ใช้ runtime แล้ว (แมพ 3D IslandMap3D) → ไม่ ignore
