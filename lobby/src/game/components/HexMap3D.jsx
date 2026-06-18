@@ -52,6 +52,8 @@ function hexWorld(col, row, cx0, cz0) {
 
 // ─── CAMERA constant ──────────────────────────────────────────────
 const FOV = 820, CAM_HEIGHT = 9, CAM_DIST = 8;
+// มุมก้มกล้องคงที่ (turntable): กล้องนิ่ง ไม่ก้ม-เงย ไม่ pan — หมุนได้แค่ "ตัวแมพ" รอบจุดกลาง
+const CAM_PITCH = 50 * Math.PI / 180;
 
 function shd(hex, p) {
   const n = parseInt(hex.replace("#", ""), 16); const f = p / 100;
@@ -78,7 +80,7 @@ export default function HexMap3D({
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   // กล้อง (เก็บใน ref เพื่อไม่ rerender)
-  const cam = useRef({ yaw: 0, pitch: 0.62, zoom: 1, panX: 0, panZ: 0, scale: 1 });
+  const cam = useRef({ yaw: 0, pitch: CAM_PITCH, zoom: 1, panX: 0, panZ: 0, scale: 1 });
   // ข้อมูลล่าสุด (อ่านใน loop)
   const data = useRef({});
   data.current = { cells, players, myIdx, currentTurn, reachableCells, attackableCells, trapCells, skillTargetCells, selectedCell, pendingMove, zones, categoryColors };
@@ -168,30 +170,22 @@ export default function HexMap3D({
   // ── input ──
   useEffect(() => {
     const cv = canvasRef.current;
-    let drag = false, mode = "orbit", sx, sy, syaw, spitch, spanX, spanZ, moved = 0;
+    let drag = false, sx, sy, syaw, moved = 0;
     const down = (e) => {
       const t = e.touches ? e.touches[0] : e;
       drag = true; moved = 0;
-      mode = (e.shiftKey || (e.touches && e.touches.length > 1)) ? "pan" : "orbit";
       sx = t.clientX; sy = t.clientY;
-      const c = cam.current; syaw = c.yaw; spitch = c.pitch; spanX = c.panX; spanZ = c.panZ;
+      syaw = cam.current.yaw;
     };
     const move = (e) => {
       if (!drag) return;
       const t = e.touches ? e.touches[0] : e;
       const dx = t.clientX - sx, dy = t.clientY - sy;
       moved += Math.abs(dx) + Math.abs(dy);
-      const c = cam.current;
-      if (mode === "pan") {
-        const cs = Math.cos(-c.yaw), sn = Math.sin(-c.yaw);
-        const mx = -dx * 0.016 / c.zoom, mz = -dy * 0.016 / c.zoom;
-        c.panX = spanX + (mx * cs - mz * sn); c.panZ = spanZ + (mx * sn + mz * cs);
-      } else {
-        c.yaw = syaw + dx * 0.006;
-        c.pitch = Math.max(0.34, Math.min(1.04, spitch + dy * 0.004));
-      }
+      // turntable: ลากแนวนอน = หมุน "ตัวแมพ" รอบจุดกลาง (กล้อง+มุมก้มคงที่ ไม่มี pan)
+      cam.current.yaw = syaw + dx * 0.006;
       dragging.current = true;   // กำลังลาก → โหมดเรนเดอร์เบา (ลื่น)
-      sceneDirty.current = true; // กล้องขยับ → วาดฉากใหม่
+      sceneDirty.current = true; // แมพหมุน → วาดฉากใหม่
       if (e.touches) e.preventDefault();
     };
     const up = (e) => {
@@ -283,6 +277,7 @@ export default function HexMap3D({
     drawBG(sctx, sc, t, fast);
     picks.current = [];
     if (!d.cells.length) return;
+    drawBase(sctx, t); // ฐานกลม (จานหมุน) ใต้กระดาน
 
     // ช่อง hex (พื้นผิว) เรียงตาม depth
     const tiles = [];
@@ -654,6 +649,39 @@ export default function HexMap3D({
     ctx.restore();
   }
 
+  // ── ฐานกลม (จานหมุน) ใต้กระดาน — ดูเป็นบอร์ดเกมจริง + มาร์กเกอร์ทองช่วยดูทิศที่หมุนไป ──
+  function drawBase(ctx, t) {
+    const { cx0, cz0 } = centerRef.current;
+    const RB = Math.hypot(cx0, cz0) + COL_SP * 1.4; // รัศมีฐานครอบกระดานทั้งหมด
+    const N = 56;
+    const rim = (yy) => {
+      const a = [];
+      for (let i = 0; i < N; i++) {
+        const th = i / N * Math.PI * 2;
+        const p = project(RB * Math.cos(th), yy, RB * Math.sin(th));
+        if (p) a.push(p);
+      }
+      return a;
+    };
+    const fill = (pts, color, stroke, lw) => {
+      if (pts.length < 3) return;
+      ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.closePath();
+      ctx.fillStyle = color; ctx.fill();
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+    };
+    fill(rim(-0.3), "#0d0a05");                                  // ผนัง/ฐานล่าง (เงา)
+    fill(rim(-0.02), "#221c12", "rgba(201,168,76,0.55)", 2);    // หน้าฐาน + ขอบทอง
+    // มาร์กเกอร์ทิศ (ติดขอบแมพ → หมุนตามแมพ บอกว่าหมุนไปเท่าไหร่ กันงงทิศ)
+    const m1 = project(RB + COL_SP * 0.5, 0, 0),
+          m2 = project(RB - COL_SP * 0.15, 0, ROW_SP * 0.5),
+          m3 = project(RB - COL_SP * 0.15, 0, -ROW_SP * 0.5);
+    if (m1 && m2 && m3) {
+      ctx.beginPath(); ctx.moveTo(m1.x, m1.y); ctx.lineTo(m2.x, m2.y); ctx.lineTo(m3.x, m3.y); ctx.closePath();
+      ctx.fillStyle = "#c9a84c"; ctx.fill();
+      ctx.strokeStyle = "#6a5320"; ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+
   // ── BG ──
   function drawBG(ctx, cv, t, fast) {
     const W = cv.width, H = cv.height;
@@ -682,10 +710,10 @@ export default function HexMap3D({
       <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6, zIndex: 5 }}>
         <CamBtn onClick={() => { cam.current.zoom = Math.min(2.6, cam.current.zoom * 1.15); sceneDirty.current = true; }}>＋</CamBtn>
         <CamBtn onClick={() => { cam.current.zoom = Math.max(0.45, cam.current.zoom * 0.85); sceneDirty.current = true; }}>－</CamBtn>
-        <CamBtn onClick={() => { const c = cam.current; c.yaw = 0; c.pitch = 0.62; c.zoom = 1; c.panX = 0; c.panZ = 0; sceneDirty.current = true; }}>⟳</CamBtn>
+        <CamBtn onClick={() => { const c = cam.current; c.yaw = 0; c.pitch = CAM_PITCH; c.zoom = 1; c.panX = 0; c.panZ = 0; sceneDirty.current = true; }}>⟳</CamBtn>
       </div>
       <div style={{ position: "absolute", bottom: 8, left: 8, fontSize: 10, color: "#888", background: "rgba(13,11,8,.7)", border: "1px solid rgba(201,168,76,.25)", borderRadius: 6, padding: "4px 8px", pointerEvents: "none", fontFamily: "'Cinzel',serif" }}>
-        ลาก=หมุนกล้อง · Shift+ลาก=เลื่อน · ล้อ=ซูม · คลิก=เลือกช่อง
+        ลาก=หมุนแมพ · ล้อ=ซูม · คลิก=เลือกช่อง
       </div>
     </div>
   );
