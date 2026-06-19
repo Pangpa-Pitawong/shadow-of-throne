@@ -411,12 +411,10 @@ function killPlayer(gs, p) {
 // ✅ เดินได้ทุกที่ — น้ำผ่านได้ (ต้นทุนสูง) ไม่ใช่ 99 (ผ่านไม่ได้) อีกต่อไป
 const TERRAIN_MOVE_COST = { plains: 1, forest: 2, mountain: 3, water: 3, desert: 2, swamp: 3 };
 
+const DIRS8 = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
 function getNeighborKeys(col, row, cellMap, blockWater = true) {
-  const isOdd = col % 2 === 1;
-  const dirs = isOdd
-    ? [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]]
-    : [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]];
-  return dirs
+  // SQUARE grid 8 ทิศ (เดินทแยงได้)
+  return DIRS8
     .map(([dc, dr]) => `${col + dc},${row + dr}`)
     .filter(k => cellMap[k] && (!blockWater || cellMap[k].terrain !== "water"));
 }
@@ -453,14 +451,8 @@ function getReachableServer(startCol, startRow, steps, cells) {
 }
 
 function hexDistanceServer(aCol, aRow, bCol, bRow) {
-  // cube-coordinate distance (odd-q offset) — ตรงกับ client hexMath
-  const toCube = (col, row) => {
-    const x = col;
-    const z = row - (col - (col & 1)) / 2;
-    return { x, y: -x - z, z };
-  };
-  const ac = toCube(aCol, aRow), bc = toCube(bCol, bRow);
-  return (Math.abs(ac.x - bc.x) + Math.abs(ac.y - bc.y) + Math.abs(ac.z - bc.z)) / 2;
+  // SQUARE grid 8 ทิศ → Chebyshev distance (ตรงกับ client hexMath)
+  return Math.max(Math.abs(aCol - bCol), Math.abs(aRow - bRow));
 }
 
 // ─── CARD ENGINE CONTEXT — ฉีด helper ของเกมให้ cardEngine.js ────────────────
@@ -529,8 +521,7 @@ function createInitialGameState(room) {
   }
   // ── ขนาดแมพ (พรีเซ็ต) — medium = 13×11 (เท่าเดิมเป๊ะ) ──────────────────────
   const { cols: COLS, rows: ROWS } = MAP_SIZES[cfg.size] || MAP_SIZES.medium;
-  const BASE_COLS = 13, BASE_ROWS = 11;
-  // โซนหลักมีเสมอ · โซนอันตราย/ร้านค้าเปิด-ปิดได้ · โซนเสริมขึ้นกับความหนาแน่น
+  // ─── โซนพิเศษ: หมวดหมู่ + เปิด/ปิดตาม config ──────────────────────────────────
   const CORE_ZONES = new Set(["palace", "throne", "village", "market", "rebel_camp", "quest_board"]);
   const DANGER_ZONES = new Set(["cave", "volcano", "dungeon", "ruins", "dark_forest", "graveyard"]);
   const SHOP_ZONE_TYPES = new Set(["blacksmith", "alchemist", "tavern", "armory"]);
@@ -539,37 +530,63 @@ function createInitialGameState(room) {
     if (CORE_ZONES.has(zone)) return true;
     if (DANGER_ZONES.has(zone)) return cfg.dangerZones && Math.random() < densityP;
     if (SHOP_ZONE_TYPES.has(zone)) return cfg.shops && Math.random() < Math.max(densityP, 0.6);
-    return Math.random() < densityP; // โซนเสริม (tower/shrine/treasure/farm/river/...)
+    return Math.random() < densityP;
   }
 
-  const FIXED_ZONES_BASE = {
-    "6,0": "palace", "6,1": "throne", "2,1": "village", "6,5": "market",
-    "1,8": "rebel_camp", "4,5": "dark_forest", "9,2": "tower",
-    "0,10": "shrine", "11,9": "cave",
-    "3,3": "blacksmith", "9,7": "alchemist", "2,5": "tavern",
-    "10,4": "armory", "5,9": "dungeon", "7,3": "quest_board",
-    "4,1": "treasure", "8,9": "farm", "6,3": "river",
-    "11,5": "ruins", "0,2": "watchtower", "3,7": "graveyard",
-    "10,1": "volcano", "5,5": "portal", "12,8": "oasis",
+  // ─── เกาะแบบ prototype: 4 ไบโอม (NW หญ้า · NE หิมะ · SW ป่า · SE ทะเลทราย) ──
+  //   + แกนกลาง "บัลลังก์เงา" บนที่ราบสูง + วงแหวนเงา + ชายหาดรอบเกาะ + ลาวา
+  //   แต่ละช่องเก็บ biome + elev (ความสูงชั้นหิน สำหรับ render voxel) + terrain (ต้นทุนเดิน)
+  const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
+  const maxR = Math.max(cx, cy);
+  const seed = Math.random() * 1000;
+  const h2 = (x, y) => { const n = Math.sin(x * 127.1 + y * 311.7 + seed) * 43758.5453; return n - Math.floor(n); };
+  const snoise = (x, y) => {
+    const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+    const a = h2(x0, y0), b = h2(x0 + 1, y0), c = h2(x0, y0 + 1), d = h2(x0 + 1, y0 + 1);
+    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    return a * (1 - ux) * (1 - uy) + b * ux * (1 - uy) + c * (1 - ux) * uy + d * ux * uy;
   };
-  // สเกลตำแหน่งโซนคงที่ตามขนาดแมพ — medium (13×11) = identity (เหมือนเดิม)
-  // เกาะกลุ่มสำคัญ (palace/throne/market) จัดแนวกลางคอลัมน์เสมอ
-  const FIXED_ZONES = {};
-  for (const [k, zone] of Object.entries(FIXED_ZONES_BASE)) {
-    const [bc, br] = k.split(",").map(Number);
-    const nc = COLS === BASE_COLS ? bc : Math.round((bc / (BASE_COLS - 1)) * (COLS - 1));
-    const nr = ROWS === BASE_ROWS ? br : Math.round((br / (BASE_ROWS - 1)) * (ROWS - 1));
-    FIXED_ZONES[`${nc},${nr}`] = zone; // ย่อแมพอาจชนกัน → โซนหลังทับ (โซนน้อยลงตามขนาด)
+  const quadrant = (col, row) => {
+    const left = (col - row) < (cx - cy);
+    const top = (col + row) < (cx + cy);
+    return top ? (left ? "grass" : "snow") : (left ? "forest" : "desert");
+  };
+  const throneR = Math.max(0.8, maxR * 0.18);
+  const shadowR = Math.max(1.9, maxR * 0.42);
+  const highR = maxR * 0.72;
+
+  const info = {};
+  for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+    const d = Math.hypot(col - cx, row - cy);
+    const edge = col === 0 || row === 0 || col === COLS - 1 || row === ROWS - 1;
+    const bm = quadrant(col, row);
+    let biome, elev, terrain;
+    if (d < throneR) { biome = "throne"; elev = 4 + Math.round(throneR - d); terrain = "mountain"; }
+    else if (d < shadowR) { biome = "shadow"; elev = 3; terrain = "mountain"; }
+    else {
+      const rim = edge || d > highR + (snoise(col * 0.5, row * 0.5) - 0.5) * 1.6;
+      if (rim) { biome = bm === "snow" ? "snow" : "beach"; elev = bm === "snow" ? 1 : 0; terrain = "plains"; }
+      else {
+        biome = bm;
+        const hi = snoise(col * 0.42 + 9, row * 0.42 + 3) > 0.55;
+        if (bm === "forest") { elev = hi ? 2 : 1; terrain = "forest"; }
+        else if (bm === "desert") { elev = hi ? 2 : 1; terrain = hi ? "mountain" : "desert"; }
+        else { elev = hi ? 2 : 1; terrain = hi ? "mountain" : "plains"; } // grass/snow
+      }
+    }
+    info[`${col},${row}`] = { biome, elev, terrain };
   }
-  const ZONE_TERRAIN = {
-    palace: "plains", throne: "plains", village: "plains", market: "plains",
-    quest_board: "plains", treasure: "plains", river: "plains",
-    blacksmith: "plains", alchemist: "plains", tavern: "plains", farm: "plains",
-    dark_forest: "forest", rebel_camp: "forest", graveyard: "forest",
-    cave: "mountain", dungeon: "mountain", volcano: "mountain",
-    ruins: "mountain", armory: "mountain", watchtower: "mountain",
-    shrine: "plains", oasis: "plains", portal: "plains", tower: "plains",
-  };
+
+  // ลาวาในไบโอมทะเลทราย (SE) ใกล้แกนกลาง — เลี่ยงแกนบัลลังก์/วงเงา
+  for (let s = 0; s <= 8; s++) {
+    const t = s / 8;
+    const c0 = Math.round(cx + (throneR + 0.6) + (shadowR - throneR) * t);
+    const r0 = Math.round(cy + (throneR + 0.6) + (shadowR - throneR) * t);
+    const cell = info[`${c0},${r0}`];
+    if (cell && cell.biome !== "throne" && cell.biome !== "shadow") { cell.biome = "lava"; cell.terrain = "mountain"; cell.elev = Math.max(cell.elev, 2); }
+  }
+
+  // ─── จุดเกิดผู้เล่น: มุม/ขอบ (ขอบเกาะ = ที่ราบเสมอ) ──
   const midC = Math.floor(COLS / 2), midR = Math.floor(ROWS / 2);
   const spawnPositions = [
     { col: 0, row: 0 }, { col: COLS - 1, row: 0 },
@@ -578,63 +595,77 @@ function createInitialGameState(room) {
     { col: 0, row: midR }, { col: COLS - 1, row: midR }, // ผู้เล่นคนที่ 7–8
   ];
   const spawnKeys = new Set(spawnPositions.map(s => `${s.col},${s.row}`));
-
-  // ─── สุ่มภูมิศาสตร์ใหม่ทุกเกม ──────────────────────────────────────────────
-  //   ใช้ "เมล็ดสุ่ม" แบบก้อน (cluster) ให้พื้นผิวเกาะกลุ่มกันเป็นผืนสวยงาม
-  //   ไม่ใช่สุ่มกระจายมั่ว — เลือกจุดศูนย์กลางหลายจุดแล้วแผ่ภูมิประเทศออกไป
-  //   ปรับน้ำหนักตาม mapConfig: ตัวคูณ 0=น้อย(0.3x) · 1=ปกติ(1x) · 2=มาก(2.2x)
-  const AMT_MULT = { 0: 0.3, 1: 1, 2: 2.2 };
-  const TERRAIN_BASE = { forest: 0.22, mountain: 0.14, desert: 0.10, swamp: 0.08, water: 0.06 };
-  const TERRAIN_WEIGHTS = [["plains", 0.40]];
-  for (const [t, base] of Object.entries(TERRAIN_BASE)) {
-    TERRAIN_WEIGHTS.push([t, base * (AMT_MULT[cfg.terrain[t]] ?? 1)]);
-  }
-  const TERRAIN_TOTAL = TERRAIN_WEIGHTS.reduce((s, [, w]) => s + w, 0);
-  function weightedTerrain() {
-    let r = Math.random() * TERRAIN_TOTAL;
-    for (const [t, w] of TERRAIN_WEIGHTS) { if ((r -= w) <= 0) return t; }
-    return "plains";
-  }
-  // เริ่มจากที่ราบทั้งแมพ แล้วโปรย "ก้อนภูมิประเทศ" จำนวนหนึ่งแบบสุ่ม
-  const terrainGrid = {};
-  for (let row = 0; row < ROWS; row++)
-    for (let col = 0; col < COLS; col++) terrainGrid[`${col},${row}`] = "plains";
-  // จำนวนก้อนภูมิประเทศสเกลตามพื้นที่แมพ (เดิม 14–19 ก้อนบน 143 ช่อง)
-  const blobBase = Math.round((14 + Math.floor(Math.random() * 6)) * (COLS * ROWS) / (BASE_COLS * BASE_ROWS));
-  const blobCount = Math.max(8, blobBase);
-  for (let b = 0; b < blobCount; b++) {
-    const t = weightedTerrain();
-    if (t === "plains") continue;
-    const ccol = Math.floor(Math.random() * COLS), crow = Math.floor(Math.random() * ROWS);
-    const size = 1 + Math.floor(Math.random() * 4); // รัศมีก้อน
-    for (let dr = -size; dr <= size; dr++) {
-      for (let dc = -size; dc <= size; dc++) {
-        const col = ccol + dc, row = crow + dr;
-        if (col < 0 || col > COLS - 1 || row < 0 || row > ROWS - 1) continue;
-        // ความน่าจะเป็นลดลงตามระยะจากศูนย์กลาง → ขอบก้อนขรุขระเป็นธรรมชาติ
-        const dist = Math.abs(dc) + Math.abs(dr);
-        if (Math.random() < 1 - dist / (size + 1.5)) terrainGrid[`${col},${row}`] = t;
-      }
-    }
+  for (const k of spawnKeys) {
+    const c = info[k]; if (!c) continue;
+    if (["throne", "shadow", "lava"].includes(c.biome)) c.biome = "beach";
+    c.terrain = "plains"; c.elev = 1;
   }
 
-  const cells = [];
+  // ─── วางโซนพิเศษบนเกาะตามไบโอม (บัลลังก์อยู่กลางเสมอ) ──
+  const usedZone = {};
   const zoneToCell = {};
-  const SHOP_ZONES = ["market", "blacksmith", "alchemist", "tavern", "armory"];
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      const key = `${col},${row}`;
-      const zoneCandidate = FIXED_ZONES[key] || null;
-      const specialZone = (zoneCandidate && zoneEnabled(zoneCandidate)) ? zoneCandidate : null;
-      let terrain;
-      if (specialZone && ZONE_TERRAIN[specialZone]) terrain = ZONE_TERRAIN[specialZone];
-      else if (spawnKeys.has(key)) terrain = "plains"; // จุดเกิดผู้เล่นเป็นที่ราบเสมอ
-      else terrain = terrainGrid[key];
-      let shopItems = null;
-      if (specialZone && SHOP_ZONES.includes(specialZone)) shopItems = generateShopItemsServer(specialZone);
-      if (specialZone) zoneToCell[specialZone] = key;
-      cells.push({ col, row, key, terrain, specialZone, trap: null, shopItems });
+  const ctrKey = `${Math.round(cx)},${Math.round(cy)}`;
+  usedZone[ctrKey] = "throne"; zoneToCell["throne"] = ctrKey;
+  if (info[ctrKey]) { info[ctrKey].biome = "throne"; info[ctrKey].terrain = "mountain"; info[ctrKey].elev = Math.max(info[ctrKey].elev, 5); }
+
+  const ZONE_PRED = {
+    palace: c => c.biome === "shadow",
+    village: c => c.biome === "grass",
+    market: c => c.elev >= 1 && c.biome !== "beach" && c.biome !== "lava",
+    rebel_camp: c => c.biome === "forest",
+    quest_board: () => true,
+    dark_forest: c => c.biome === "forest",
+    graveyard: c => c.biome === "forest",
+    cave: c => c.terrain === "mountain",
+    dungeon: c => c.terrain === "mountain",
+    volcano: c => c.biome === "lava" || c.biome === "desert",
+    ruins: c => c.terrain === "mountain" || c.biome === "desert",
+    blacksmith: c => c.biome === "grass" || c.biome === "snow",
+    alchemist: c => c.biome === "snow" || c.biome === "forest",
+    tavern: c => c.biome === "grass",
+    armory: c => c.terrain === "mountain" || c.biome === "snow",
+    tower: c => c.biome === "snow" || c.biome === "grass",
+    shrine: c => c.biome === "snow" || c.biome === "beach",
+    treasure: c => c.biome === "desert" || c.terrain === "mountain",
+    farm: c => c.biome === "grass",
+    river: c => c.biome === "grass" || c.biome === "forest",
+    watchtower: c => c.biome === "snow" || c.biome === "grass",
+    portal: () => true,
+    oasis: c => c.biome === "desert",
+  };
+  function placeZone(zone, mustPlace) {
+    const pred = ZONE_PRED[zone] || (() => true);
+    let cands = [];
+    for (const k in info) {
+      if (usedZone[k] || spawnKeys.has(k)) continue;
+      const c = info[k]; if (c.biome === "throne") continue;
+      if (pred(c)) cands.push(k);
     }
+    if (!cands.length && mustPlace) {
+      for (const k in info) if (!usedZone[k] && !spawnKeys.has(k) && info[k].biome !== "throne") cands.push(k);
+    }
+    if (!cands.length) return;
+    const k = cands[Math.floor(Math.random() * cands.length)];
+    usedZone[k] = zone; zoneToCell[zone] = k;
+  }
+  const ZONE_ORDER = ["palace", "village", "market", "rebel_camp", "quest_board",
+    "cave", "volcano", "dungeon", "ruins", "dark_forest", "graveyard",
+    "blacksmith", "alchemist", "tavern", "armory",
+    "tower", "shrine", "treasure", "farm", "river", "watchtower", "portal", "oasis"];
+  for (const z of ZONE_ORDER) if (zoneEnabled(z)) placeZone(z, CORE_ZONES.has(z));
+
+  // ─── สร้าง cells (แนบ biome + elev สำหรับ render voxel) ──
+  const cells = [];
+  const SHOP_ZONES = ["market", "blacksmith", "alchemist", "tavern", "armory"];
+  const FLAT_ZONES = new Set(["palace", "village", "market", "quest_board", "blacksmith", "alchemist", "tavern", "farm", "shrine", "oasis", "portal", "tower", "treasure", "watchtower"]);
+  for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+    const key = `${col},${row}`; const c = info[key];
+    const specialZone = usedZone[key] || null;
+    let terrain = c.terrain;
+    if (specialZone && FLAT_ZONES.has(specialZone) && terrain === "water") terrain = "plains";
+    let shopItems = null;
+    if (specialZone && SHOP_ZONES.includes(specialZone)) shopItems = generateShopItemsServer(specialZone);
+    cells.push({ col, row, key, terrain, specialZone, trap: null, shopItems, biome: c.biome, elev: c.elev });
   }
 
   const players = room.players.map((p, i) => {

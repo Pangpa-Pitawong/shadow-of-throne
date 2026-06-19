@@ -17,26 +17,16 @@ export function hexPoints(cx, cy, size) {
   return points.join(" ");
 }
 
+// ── SQUARE GRID 8 ทิศ (Chebyshev) — ระยะ = max(|dCol|,|dRow|) เดินทแยงได้ ──
 export function hexDistance(a, b) {
-  // layout เป็น odd-q (คอลัมน์คี่เลื่อนลง ตาม hexToPixel) — แปลงเป็น cube coordinate
-  // ให้ตรงกับ neighbor dirs และระยะที่ server คำนวณ
-  const toCube = (col, row) => {
-    const x = col;
-    const z = row - (col - (col & 1)) / 2;
-    return { x, y: -x - z, z };
-  };
-  const ac = toCube(a.col, a.row);
-  const bc = toCube(b.col, b.row);
-  return (Math.abs(ac.x - bc.x) + Math.abs(ac.y - bc.y) + Math.abs(ac.z - bc.z)) / 2;
+  return Math.max(Math.abs(a.col - b.col), Math.abs(a.row - b.row));
 }
 
+const DIRS8 = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+
 export function getNeighbors(col, row, cells) {
-  const isOdd = col % 2 === 1;
-  const dirs = isOdd
-    ? [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]]
-    : [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]];
-  // ✅ เดินได้ทุกที่บนแมพ — น้ำผ่านได้ (มีต้นทุนเดินสูง) ไม่กรองน้ำออกอีกต่อไป
-  return dirs
+  // เดินได้ทุกช่อง (น้ำผ่านได้ ต้นทุนสูง) — 8 ทิศบน square grid
+  return DIRS8
     .map(([dc, dr]) => cells.find(c => c.col === col + dc && c.row === row + dr))
     .filter(Boolean);
 }
