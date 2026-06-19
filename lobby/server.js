@@ -555,17 +555,20 @@ function createInitialGameState(room) {
   const shadowR = Math.max(1.9, maxR * 0.42);
   const highR = maxR * 0.72;
 
+  // ขอบเกาะหยักธรรมชาติ (organic) — ช่องนอกรัศมี+noise = ทะเล (สุ่มรูปทรงไม่ซ้ำทุกเกม)
   const info = {};
   for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
     const d = Math.hypot(col - cx, row - cy);
-    const edge = col === 0 || row === 0 || col === COLS - 1 || row === ROWS - 1;
+    const dx = (col - cx) / (cx + 0.5), dy = (row - cy) / (cy + 0.5);
+    const coast = Math.hypot(dx, dy) + (snoise(col * 0.6 + 5, row * 0.6 + 9) - 0.5) * 0.55;
     const bm = quadrant(col, row);
     let biome, elev, terrain;
-    if (d < throneR) { biome = "throne"; elev = 4 + Math.round(throneR - d); terrain = "mountain"; }
+    if (coast > 1.0 && d > shadowR) { biome = "water"; elev = 0; terrain = "water"; } // ทะเลล้อมเกาะ
+    else if (d < throneR) { biome = "throne"; elev = 4 + Math.round(throneR - d); terrain = "mountain"; }
     else if (d < shadowR) { biome = "shadow"; elev = 3; terrain = "mountain"; }
     else {
-      const rim = edge || d > highR + (snoise(col * 0.5, row * 0.5) - 0.5) * 1.6;
-      if (rim) { biome = bm === "snow" ? "snow" : "beach"; elev = bm === "snow" ? 1 : 0; terrain = "plains"; }
+      const beach = coast > 0.82; // แนวชายหาด/ชายฝั่งหิมะ
+      if (beach) { biome = bm === "snow" ? "snow" : "beach"; elev = bm === "snow" ? 1 : 0; terrain = "plains"; }
       else {
         biome = bm;
         const hi = snoise(col * 0.42 + 9, row * 0.42 + 3) > 0.55;
@@ -576,6 +579,7 @@ function createInitialGameState(room) {
     }
     info[`${col},${row}`] = { biome, elev, terrain };
   }
+  void highR;
 
   // ลาวาในไบโอมทะเลทราย (SE) ใกล้แกนกลาง — เลี่ยงแกนบัลลังก์/วงเงา
   for (let s = 0; s <= 8; s++) {
@@ -583,21 +587,33 @@ function createInitialGameState(room) {
     const c0 = Math.round(cx + (throneR + 0.6) + (shadowR - throneR) * t);
     const r0 = Math.round(cy + (throneR + 0.6) + (shadowR - throneR) * t);
     const cell = info[`${c0},${r0}`];
-    if (cell && cell.biome !== "throne" && cell.biome !== "shadow") { cell.biome = "lava"; cell.terrain = "mountain"; cell.elev = Math.max(cell.elev, 2); }
+    if (cell && !["throne", "shadow", "water"].includes(cell.biome)) { cell.biome = "lava"; cell.terrain = "mountain"; cell.elev = Math.max(cell.elev, 2); }
   }
 
-  // ─── จุดเกิดผู้เล่น: มุม/ขอบ (ขอบเกาะ = ที่ราบเสมอ) ──
+  // ─── จุดเกิดผู้เล่น: เลือกช่อง "บก" ที่ใกล้มุม/ขอบที่สุด (เกาะออร์แกนิก มุมอาจเป็นทะเล) ──
   const midC = Math.floor(COLS / 2), midR = Math.floor(ROWS / 2);
-  const spawnPositions = [
-    { col: 0, row: 0 }, { col: COLS - 1, row: 0 },
-    { col: 0, row: ROWS - 1 }, { col: COLS - 1, row: ROWS - 1 },
-    { col: midC, row: 0 }, { col: midC, row: ROWS - 1 },
-    { col: 0, row: midR }, { col: COLS - 1, row: midR }, // ผู้เล่นคนที่ 7–8
-  ];
+  const anchors = [[0, 0], [COLS - 1, 0], [0, ROWS - 1], [COLS - 1, ROWS - 1], [midC, 0], [midC, ROWS - 1], [0, midR], [COLS - 1, midR]];
+  const takenSpawn = new Set([`${Math.round(cx)},${Math.round(cy)}`]);
+  const nearestLand = (ac, ar) => {
+    let best = null, bd = 1e9;
+    for (const k in info) {
+      if (takenSpawn.has(k) || info[k].biome === "water") continue;
+      const [cc, rr] = k.split(",").map(Number);
+      const dd = Math.hypot(cc - ac, rr - ar);
+      if (dd < bd) { bd = dd; best = [cc, rr]; }
+    }
+    return best;
+  };
+  const spawnPositions = [];
+  for (const [ac, ar] of anchors) {
+    const l = nearestLand(ac, ar) || [ac, ar];
+    takenSpawn.add(`${l[0]},${l[1]}`);
+    spawnPositions.push({ col: l[0], row: l[1] });
+  }
   const spawnKeys = new Set(spawnPositions.map(s => `${s.col},${s.row}`));
   for (const k of spawnKeys) {
     const c = info[k]; if (!c) continue;
-    if (["throne", "shadow", "lava"].includes(c.biome)) c.biome = "beach";
+    if (["throne", "shadow", "lava", "water"].includes(c.biome)) c.biome = "beach";
     c.terrain = "plains"; c.elev = 1;
   }
 
@@ -638,11 +654,11 @@ function createInitialGameState(room) {
     let cands = [];
     for (const k in info) {
       if (usedZone[k] || spawnKeys.has(k)) continue;
-      const c = info[k]; if (c.biome === "throne") continue;
+      const c = info[k]; if (c.biome === "throne" || c.biome === "water") continue;
       if (pred(c)) cands.push(k);
     }
     if (!cands.length && mustPlace) {
-      for (const k in info) if (!usedZone[k] && !spawnKeys.has(k) && info[k].biome !== "throne") cands.push(k);
+      for (const k in info) if (!usedZone[k] && !spawnKeys.has(k) && info[k].biome !== "throne" && info[k].biome !== "water") cands.push(k);
     }
     if (!cands.length) return;
     const k = cands[Math.floor(Math.random() * cands.length)];

@@ -24,8 +24,8 @@ const ZONE_MODEL = {
   graveyard: "Rock_Group",
 };
 const ZONE_SCALE = { throne: 1.5, palace: 1.25, volcano: 1.3, oasis: 0.9, treasure: 0.8 };
-// โมเดลตกแต่งภูมิประเทศ (ป่า/หิน/ฯลฯ) ตามไบโอม
-const PROP = { tree: "Resource_Tree_Group", tree1: "Resource_Tree1", pine: "Resource_PineTree_Group", rock: "Resource_Rock_2", rockG: "Rock_Group", gold: "Resource_Gold_2", mtn: "Mountain_Single" };
+// โมเดลตกแต่งภูมิประเทศ — ใช้ "ตัวเดี่ยว" (ไม่ใช่ group) เพื่อให้ขนาดพอดี 1 ช่อง ไม่ล้น/ลอย
+const PROP = { tree: "Resource_Tree1", pine: "Resource_PineTree", rock: "Resource_Rock_2", rockG: "Rock", gold: "Resource_Gold_2", mtn: "Mountain_Single" };
 
 const HL = { reach: 0x4cc94c, attack: 0xe24b4a, trap: 0xe0962a, skill: 0xa060e0, sel: 0xc9a84c, pend: 0x7CFC7C };
 const frac = (n) => n - Math.floor(n);
@@ -189,23 +189,26 @@ export default function IslandMap3D(props) {
     const box = new THREE.BoxGeometry(0.98, 1, 0.98);
     for (const c of cells) {
       const biome = c.biome || "grass";
-      const hgt = ((c.elev ?? 1) + 1) * HSTEP;
+      const isWater = biome === "water";
+      const hgt = isWater ? 0.22 : ((c.elev ?? 1) + 1) * HSTEP;
       const wx = c.col - ox, wz = c.row - oz;
       const col = BIOME[biome] !== undefined ? BIOME[biome] : 0x6aa844;
-      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.95, flatShading: true });
+      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: isWater ? 0.25 : 0.95, flatShading: true });
+      if (isWater) { mat.transparent = true; mat.opacity = 0.85; mat.metalness = 0.1; }
       if (biome === "lava") { mat.emissive = new THREE.Color(0xe0531f); mat.emissiveIntensity = 0.5; }
       const m = new THREE.Mesh(box, mat);
       m.scale.y = hgt; m.position.set(wx, hgt / 2, wz);
-      m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
+      m.castShadow = !isWater; m.receiveShadow = true; m.frustumCulled = false;
       m.userData.cell = c;
       r.boardGroup.add(m); r.tiles.push(m);
       r.cellWorld.set(c.key, { x: wx, z: wz, top: hgt });
+      if (isWater) continue; // ทะเล: ไม่มีของตกแต่ง/อาคาร
 
-      // biome decorations
+      // biome decorations (ตัวเดี่ยว วางบนผิวช่อง — ป่าวาง 2 ต้นให้ทึบ)
       const pk = propKind(biome, c);
-      if (pk) placeProp(r, pk, wx, hgt, wz, c);
+      if (pk) { const n = pk === "tree" ? 2 : 1; for (let i = 0; i < n; i++) placeProp(r, pk, wx, hgt, wz, c, i); }
 
-      // special-zone building + icon billboard
+      // special-zone: อาคาร glTF (วางบนผิวช่อง) + ธงปักพื้นถ้าไม่มีโมเดล (ไม่มีไอคอนลอย)
       if (c.specialZone) {
         const mn = ZONE_MODEL[c.specialZone], tpl = mn && r.templates[mn];
         if (tpl) {
@@ -218,9 +221,10 @@ export default function IslandMap3D(props) {
             r.throneGlow.position.set(wx, hgt + 3, wz); r.throneGlow.intensity = 24;
           }
           r.propGroup.add(o);
+        } else {
+          const zd = (pr.current.zones || {})[c.specialZone];
+          r.propGroup.add(groundFlag(wx, hgt, wz, zd?.color || "#c9a84c"));
         }
-        const zd = (pr.current.zones || {})[c.specialZone];
-        if (zd?.ico) { const spr = iconSprite(zd.ico, zd.color || "#c9a84c"); spr.position.set(wx, hgt + (tpl ? 2.4 : 1.1), wz); r.propGroup.add(spr); }
       }
     }
     frameCamera(r);
@@ -233,21 +237,23 @@ export default function IslandMap3D(props) {
     if (biome === "desert") return hv < 0.28 ? "rock" : (hv < 0.36 ? "gold" : null);
     if (biome === "shadow") return hv < 0.4 ? "rockGdark" : null;
     if (biome === "lava") return hv < 0.5 ? "rockGdark" : null;
-    if (biome === "grass") return hv < 0.16 ? "tree1" : null;
-    if (biome === "beach") return null;
-    // highland (terrain mountain in grass/desert/snow handled above; fallback rocks)
+    if (biome === "grass") return hv < 0.22 ? "tree" : null;
+    if (biome === "beach" || biome === "water") return null;
     if (c.terrain === "mountain" && biome !== "throne") return hv < 0.5 ? "rockG" : "mtn";
     return null;
   }
-  function placeProp(r, kind, wx, top, wz, c) {
+  function placeProp(r, kind, wx, top, wz, c, idx = 0) {
     const dark = kind === "rockGdark";
     const key = dark ? "rockG" : kind;
     const mn = PROP[key]; const tpl = mn && r.templates[mn];
     if (!tpl) return;
     const o = tpl.clone(true);
-    o.scale.setScalar(r.GS * (kind === "tree" || kind === "pine" ? 0.95 : 0.8));
-    o.position.set(wx + (rhash(c.col + 1, c.row) - 0.5) * 0.3, top, wz + (rhash(c.col, c.row + 1) - 0.5) * 0.3);
-    o.rotation.y = rhash(c.col + 2, c.row + 5) * Math.PI * 2;
+    const scl = (kind === "tree" || kind === "pine") ? 0.7 : (kind === "mtn" ? 0.8 : 0.55);
+    o.scale.setScalar(r.GS * scl);
+    const jx = (rhash(c.col * 4 + idx + 1, c.row * 7) - 0.5) * 0.42;
+    const jz = (rhash(c.col * 9, c.row * 5 + idx + 2) - 0.5) * 0.42;
+    o.position.set(wx + jx, top, wz + jz);
+    o.rotation.y = rhash(c.col + idx * 3 + 2, c.row + 5) * Math.PI * 2;
     if (dark) o.traverse(n => { if (n.isMesh) { n.material = n.material.clone(); n.material.color.multiplyScalar(0.5); n.material.color.lerp(new THREE.Color(0x5a3a8a), 0.4); } });
     r.propGroup.add(o);
   }
@@ -321,11 +327,19 @@ function iconSprite(ico, ringColor, scale = 1) {
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
   spr.scale.set(0.85 * scale, 0.85 * scale, 1); return spr;
 }
+function groundFlag(wx, top, wz, color) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 1 }));
+  pole.position.y = 0.8; pole.castShadow = true;
+  const flag = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.36, 0.05), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.6 }));
+  flag.position.set(0.28, 1.4, 0); flag.castShadow = true;
+  g.add(pole, flag); g.position.set(wx, top, wz); return g;
+}
 function frameCamera(r) {
   const radius = (r.boardRadius && isFinite(r.boardRadius)) ? r.boardRadius : 10;
-  const d = radius * 1.8 + 6;
-  r.controls.target.set(0, 0.6, 0);
-  r.cam.position.set(d * 0.62, d * 0.8, d * 0.62);
+  const d = radius * 2.5 + 8;
+  r.controls.target.set(0, 1.0, 0);
+  r.cam.position.set(d * 0.6, d * 0.82, d * 0.6);
   r.cam.near = 0.5; r.cam.far = d * 6 + 80; r.cam.updateProjectionMatrix();
   r.scene.updateMatrixWorld(true); r.controls.update();
 }
