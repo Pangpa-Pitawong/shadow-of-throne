@@ -1,7 +1,7 @@
 import http from "http";
 import { WebSocketServer } from "ws";
 import { parse } from "url";
-import { MAGIC_CARDS, ALL_CARDS, drawWeighted, rarityMeta } from "./src/game/constants/cards.js";
+import { MAGIC_CARDS, drawWeighted, rarityMeta } from "./src/game/constants/cards.js";
 import {
   useMagic, equipWeapon, placeTrap, triggerTrap,
   gearResistance, isGearActive, hasMetalArmor, METAL_SLOTS,
@@ -15,19 +15,21 @@ import { rooms, clients } from "./src/game/server/state.js";
 import { rnd, shuffle, makeUid } from "./src/game/server/util.js";
 import { DIRS8, getReachableCostMap, hexDistanceServer } from "./src/game/server/hex.js";
 import { MAP_SIZES, sanitizeMapConfig } from "./src/game/server/mapConfig.js";
+import {
+  MAX_CARDS_PER_TURN, BASE_MOVE_BUDGET,
+  ALL_CARDS_POOL, WEAPON_POOL, MAGIC_POOL, NEG_STATUS,
+  CHARACTERS_DATA, STARTING_GEAR, BOSS_TYPES,
+} from "./src/game/server/constants.js";
+import {
+  send, redactRoomFor, redactGameStateFor,
+  broadcastGameState, broadcast, broadcastRoomList,
+} from "./src/game/server/net.js";
 
 const PORT = process.env.PORT || 3001;
 
-// ─── กติกา: ใช้การ์ดได้ไม่เกิน N ใบต่อเทิร์น ──────────────────────────────────
-const MAX_CARDS_PER_TURN = 4;
-
-// ─── กติกา: ค่าการเดินต่อเทิร์น (งบเดิน) ──────────────────────────────────────
-//   ทุกตัวละครได้ "งบการเดิน" 5 หน่วยต่อเทิร์น หักด้วยต้นทุนภูมิประเทศของเส้นทาง
-//   ถ้ายังเหลืองบ ก็เดินต่อได้เรื่อยๆ จนกว่างบจะหมด (เดินเป็นช่วงๆ ได้)
-const BASE_MOVE_BUDGET = 5;
-
-// MAP CONFIG (DEFAULT_MAP_CFG, MAP_SIZES, sanitizeMapConfig) → server/mapConfig.js
-// State (rooms, clients) → server/state.js
+// Tuning + pools + character data → server/constants.js
+// Networking + redaction → server/net.js
+// MAP CONFIG → server/mapConfig.js · State (rooms, clients) → server/state.js
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function genCode() {
@@ -41,9 +43,7 @@ function genCode() {
   return code;
 }
 
-function send(ws, data) {
-  if (ws.readyState === 1) ws.send(JSON.stringify(data));
-}
+// send → server/net.js
 
 // ─── ชื่อผู้เล่นต้องไม่ซ้ำกันในห้องเดียวกัน ───────────────────────────────────
 //   ตัวตนของ client ทั้งฝั่ง server (rolesReady/charReady) และฝั่ง client
@@ -58,116 +58,8 @@ function uniqueName(room, desired) {
   return `${base} (${n})`;
 }
 
-// ─── REDACT ROOM: ปกปิดข้อมูลลับใน room_update ─────────────────────────────────
-//   • บทบาทเป็นความลับ (เกมสืบบทบาท) — เห็นได้แค่ "ของตัวเอง" + "พระราชา" (เปิดเผยอยู่แล้ว)
-//   • ตัด gameState ออกเสมอ — ส่งแยกผ่าน game_state (ที่ redact รายผู้เล่น) เพื่อกัน
-//     ข้อมูลลับ (มือไพ่/บทบาท/เควส) รั่ว และลดขนาด payload ของ room_update
-function redactRoomFor(room, viewerIdx) {
-  if (!room) return room;
-  const clone = { ...room };
-  delete clone.gameState;
-  if (room.roles) {
-    clone.roles = room.roles.map((r, i) =>
-      (i === viewerIdx || r === "king") ? r : "hidden"
-    );
-  }
-  return clone;
-}
-
 // rnd, shuffle, makeUid → server/util.js
-
-// ─── REDACT: ปกปิดข้อมูลลับรายผู้เล่น ────────────────────────────────────────
-//   • บทบาท: เห็นได้เฉพาะตัวเอง / พระราชา(เปิดเสมอ) / ผู้ที่ตายแล้ว(revealed)
-//   • การ์ดในมือ: เห็นเฉพาะของตัวเอง (คนอื่นเห็นแค่จำนวน)
-//   • เควสรอง: เห็นเฉพาะของตัวเอง
-//   • ม่านหมอก (fogActive): ซ่อนตัวละครจากทุกคน (ชื่อ/อาชีพ/ตำแหน่ง/บันทึก)
-//        ยกเว้นผู้เล่นที่ยืน "ช่องเดียวกัน" กับผู้ชม — จะเห็นตามปกติ
-//        เมื่อจบเฟสม่านหมอก ข้อมูลทั้งหมดกลับมาแสดง
-function redactGameStateFor(gs, viewerIdx) {
-  // ── perf: shallow clone เท่าที่จำเป็น แทน JSON deep-clone ทั้งก้อน ──
-  //   redact แก้เฉพาะ field ระดับบนของ player (reassign) ไม่เคยแก้ nested object
-  //   → shallow copy ของ top-level + ของแต่ละ player ก็พอ (cells/log อ้างอิงตรงได้)
-  //   ลดต้นทุนต่อ broadcast จาก O(ทั้ง state × ผู้เล่น) เหลือ O(ผู้เล่น)
-  const clone = { ...gs };
-  delete clone._questTargets;
-  delete clone._code;
-  delete clone._discard;
-  delete clone._interruptTimer;
-  delete clone._eventSeq;
-  if (clone.gameOver) return clone; // จบเกม — เปิดทุกอย่าง
-
-  const viewer = gs.players[viewerIdx];
-  clone.players = gs.players.map((src, i) => {
-    const p = { ...src };
-    const isSelf = i === viewerIdx;
-    p.handCount = p.hand ? p.hand.length : 0;
-    if (!isSelf) {
-      p.hand = [];
-      p.questChoices = null;
-      p.quest = p.quest ? { hidden: true, done: !!p.quest.done } : null;
-      // เปิดเผยรายบุคคล (สกิลสอดแนม/ทำนาย) — เห็นเฉพาะผู้ที่ใช้สกิลเท่านั้น
-      const privatelyKnown = Array.isArray(p._privateRevealTo) && p._privateRevealTo.includes(viewerIdx);
-      const roleVisible = p.role === "king" || p.revealed || privatelyKnown;
-      if (!roleVisible) p.role = "hidden";
-      // ── ม่านหมอก — ซ่อนตัวละครจากทุกคน ยกเว้นผู้ที่อยู่ช่องเดียวกัน ──
-      if (clone.fogActive) {
-        const sameCell = viewer && p.col === viewer.col && p.row === viewer.row;
-        if (!sameCell) {
-          p.name = "ผู้เล่นปริศนา";
-          p.classId = "hidden";
-          p.equipment = [];
-          p.statusEffects = [];
-          p.fogged = true;
-          p.hiddenByFog = true; // client: ไม่วาดโทเคนบนแมพ (มองไม่เห็นตำแหน่ง)
-        }
-      }
-    }
-    delete p._privateRevealTo; // ไม่ส่งรายชื่อผู้ที่รู้โรลออกไป
-    return p;
-  });
-
-  // ม่านหมอก — ปกปิดบันทึกของเฟสปัจจุบัน (เปิดอ่านได้เมื่อจบเฟส)
-  if (clone.fogActive) {
-    clone.log = clone.log.map(e =>
-      (e.fog && e.ph === clone.phase)
-        ? { msg: "🌫️ เหตุการณ์ถูกปกปิดในม่านหมอก...", type: "fog", ts: e.ts }
-        : e
-    );
-  }
-  return clone;
-}
-
-function broadcastGameState(code, extra = {}) {
-  const room = rooms[code];
-  if (!room || !room.gameState) return;
-  for (const [ws, info] of clients) {
-    if (info.code === code && ws.readyState === 1) {
-      const snapshot = redactGameStateFor(room.gameState, info.playerIdx);
-      ws.send(JSON.stringify({ type: "game_state", gameState: snapshot, ...extra }));
-    }
-  }
-}
-
-function broadcast(code) {
-  const room = rooms[code];
-  if (!room) return;
-  for (const [ws, info] of clients) {
-    if (info.code === code && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: "room_update", room: redactRoomFor(room, info.playerIdx) }));
-    }
-  }
-}
-
-function broadcastRoomList() {
-  const list = Object.values(rooms).filter(
-    r => r.visibility === "public" && r.status !== "started" &&
-      Date.now() - r.createdAt < 30 * 60 * 1000
-  );
-  const msg = JSON.stringify({ type: "room_list", rooms: list });
-  for (const [ws] of clients) {
-    if (ws.readyState === 1) ws.send(msg);
-  }
-}
+// REDACT (redactRoomFor, redactGameStateFor) + broadcast* → server/net.js
 
 function assignRoles(count) {
   // ทรยศ (traitor) ไม่ถูกแจกตั้งแต่ต้น — เกิด dynamic เมื่อราชาตาย
@@ -182,14 +74,7 @@ function assignRoles(count) {
   return pool;
 }
 
-// ─── CARDS POOL (จาก constants ที่แชร์กับ client) ───────────────────────────
-const ALL_CARDS_POOL = ALL_CARDS;
-const WEAPON_POOL = ALL_CARDS.filter(c => c.type === "weapon");
-const MAGIC_POOL = ALL_CARDS.filter(c => c.type === "magic");
-const NEG_STATUS = new Set([
-  "poison", "burn", "freeze", "lock", "blind", "atk_down", "armor_break", "silence",
-  "stun", "trip", "slow", "curse",
-]);
+// CARDS POOL + NEG_STATUS → server/constants.js
 
 // จั่วการ์ดแบบถ่วงน้ำหนักตามความหายาก (% การจั่วตรงตามที่กำหนดใน RARITY)
 function drawRandomCard(pool = ALL_CARDS_POOL) {
@@ -383,44 +268,7 @@ const CARD_CTX = {
   cellAt: (gs, col, row) => gs.cells.find(c => c.col === col && c.row === row),
 };
 
-// ─── CHARACTER DATA — derive จาก shared CHARACTERS (แหล่งความจริงเดียว) ────
-const CHARACTERS_DATA = Object.fromEntries(
-  Object.entries(CHARACTERS).map(([id, c]) => [id, {
-    hp: c.hp, maxHp: c.hp,
-    mana: c.mana, maxMana: c.mana,
-    baseAtk: c.atk, baseDef: c.def, move: c.move,
-  }])
-);
-// fallback ถ้าไม่เลือกตัวละคร
-CHARACTERS_DATA["_default"] = { hp: 12, maxHp: 12, mana: 6, maxMana: 6, baseAtk: 3, baseDef: 2, move: 3 };
-
-// ─── STARTING GEAR — อุปกรณ์เริ่มต้นตามตัวละคร ─────────────────────────────
-const STARTING_GEAR = {
-  sunwu:       { id: "iron_sword",    name: "ดาบเหล็ก",          ico: "⚔️",  type: "weapon", atk: 1, range: 0 },
-  zhenghe:     { id: "explorer_map",  name: "แผนที่นักสำรวจ",    ico: "🗺️",  type: "weapon", range: 2, effect: "ranged" },
-  icemage:     { id: "frost_staff",   name: "ไม้เท้าน้ำแข็ง",   ico: "❄️",  type: "weapon", atk: 1, range: 3, effect: "ranged" },
-  archer:      { id: "short_bow",     name: "ธนูสั้น",            ico: "🏹",  type: "weapon", atk: 1, range: 4, effect: "ranged" },
-  cleric:      { id: "holy_staff",    name: "ไม้เท้าศักดิ์สิทธิ์",ico: "⚕️", type: "weapon", def: 1, range: 2 },
-  assassin:    { id: "twin_dagger",   name: "กริชคู่",            ico: "🗡️",  type: "weapon", atk: 1, range: 0, effect: "backstab" },
-  swordmaster: { id: "fine_sword",    name: "ดาบประณีต",          ico: "🔱",  type: "weapon", atk: 1, range: 0 },
-  guardian:    { id: "tower_shield",  name: "โล่เหล็กใหญ่",      ico: "🛡️",  type: "weapon", def: 2, range: 0 },
-  firemage:    { id: "fire_staff",    name: "ไม้เท้าไฟ",          ico: "🔥",  type: "weapon", atk: 1, range: 3, effect: "ranged" },
-  herbalist:   { id: "herb_satchel",  name: "ถุงสมุนไพร",         ico: "🌿",  type: "weapon", range: 2 },
-  general:     { id: "battle_axe",    name: "ขวานสงคราม",          ico: "🪖",  type: "weapon", atk: 1, def: 1, range: 0 },
-  oracle:      { id: "crystal_orb",   name: "ลูกแก้วทำนาย",        ico: "🔮",  type: "weapon", range: 3, effect: "ranged" },
-};
-
-// ─── PHASE EVENTS ────────────────────────────────────────────────────────────
-//   เหตุการณ์ท้ายเฟสย้ายไปใช้ EVENT_CARDS (constants/events.js) + applyEventCard()
-
-// ─── BOSS TYPES (โผล่หลังครบเฟส) ────────────────────────────────────────────
-const BOSS_TYPES = [
-  { name: "มังกรเงา", ico: "🐲" },
-  { name: "อัศวินมรณะ", ico: "☠️" },
-  { name: "ปีศาจไฟ", ico: "👹" },
-  { name: "ราชันอสูร", ico: "😈" },
-  { name: "ภูตพายุ", ico: "🌪️" },
-];
+// CHARACTERS_DATA, STARTING_GEAR, BOSS_TYPES → server/constants.js
 
 // ─── Game State Initializer ──────────────────────────────────────────────────
 function createInitialGameState(room) {
