@@ -58,6 +58,7 @@ export function redactGameStateFor(gs, viewerIdx) {
           p.statusEffects = [];
           p.fogged = true;
           p.hiddenByFog = true; // client: ไม่วาดโทเคนบนแมพ (มองไม่เห็นตำแหน่ง)
+          p._moveTrail = null;  // ไม่รั่วเส้นทางเดินของคนที่ถูกม่านหมอกซ่อน
         }
       }
     }

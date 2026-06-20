@@ -894,6 +894,7 @@ export function beginTurn(gs, isFirst = false, guard = 0) {
   }
   const wasDamaged = p._damagedSinceTurn;
   p._movedSinceTurn = false;
+  p._moveTrail = null;                     // ล้างเส้นทางเดินเก่า (อนิเมชันฝั่ง client)
   p._damagedSinceTurn = false;
   p._hpLostThisRound = 0;                 // รีเซ็ตตัวนับ "ขวานโลหิตราชัน" (rage)
   // ลดคูลดาวน์อาวุธ (เช่น หอกเขี้ยวมังกรดำ)

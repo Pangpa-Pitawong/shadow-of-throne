@@ -7,7 +7,7 @@ import {
 import { CHARACTERS } from "../constants/characters.js";
 import { rooms, clients } from "./state.js";
 import { makeUid } from "./util.js";
-import { getReachableCostMap, hexDistanceServer } from "./hex.js";
+import { getReachableCostMap, getPath, hexDistanceServer } from "./hex.js";
 import { MAX_CARDS_PER_TURN } from "./constants.js";
 import { send, broadcast, broadcastGameState, broadcastRoomList } from "./net.js";
 import {
@@ -85,15 +85,31 @@ export function handleGameAction(ws, msg) {
       const moveLeft = gs.actionsDone.moveLeft ?? 0;
       if (moveLeft <= 0) return send(ws, { type: "error", msg: "ไม่มีระยะเดินเหลือ / ถูกล็อกในเทิร์นนี้" });
       const { col, row } = payload;
-      // หักจาก "งบเดินที่เหลือ" — เดินเป็นช่วงๆ ได้ตราบใดที่งบยังเหลือ
+      // เส้นทางต้นทุนต่ำสุดถึงเป้าหมาย (server-authoritative) — เดินผ่านทีละช่อง ไม่วาปข้าม
+      const route = getPath(cp.col, cp.row, moveLeft, col, row, gs.cells);
+      if (!route) return send(ws, { type: "error", msg: `เดินไป (${col},${row}) ไม่ได้ — ไกลเกินงบเดินที่เหลือ` });
       const costMap = getReachableCostMap(cp.col, cp.row, moveLeft, gs.cells);
-      const stepCost = costMap.get(`${col},${row}`);
-      if (stepCost === undefined) return send(ws, { type: "error", msg: `เดินไป (${col},${row}) ไม่ได้ — ไกลเกินงบเดินที่เหลือ` });
-      const targetCell = gs.cells.find(c => c.col === col && c.row === row);
-      if (!targetCell) return;
 
-      cp.col = col; cp.row = row;
-      gs.actionsDone.moveLeft = moveLeft - stepCost;
+      // เดินทีละช่องตามเส้นทาง — เหยียบกับดักระหว่างทาง = ทริกเกอร์ทันที + หยุดที่ช่องนั้น
+      const startKey = `${cp.col},${cp.row}`;
+      const trail = [{ col: cp.col, row: cp.row }];
+      let landed = gs.cells.find(c => c.col === cp.col && c.row === cp.row);
+      let trapped = false;
+      for (let i = 1; i < route.cells.length; i++) {
+        const step = route.cells[i];
+        cp.col = step.col; cp.row = step.row;
+        landed = step;
+        trail.push({ col: step.col, row: step.row });
+        if (step.trap) {
+          triggerTrap(gs, cp, step, CARD_CTX); // โดนกับดักระหว่างทาง → หยุดเดิน
+          trapped = true;
+          break;
+        }
+        if (!cp.alive) break;
+      }
+
+      const spent = costMap.get(`${landed.col},${landed.row}`) ?? 0;
+      gs.actionsDone.moveLeft = moveLeft - spent;
       gs.actionsDone.moved = true;
       // เดิน → ล้างการชาร์จความเร็ว (SPD กลับค่าเริ่มต้น) + จดว่าเทิร์นนี้ได้เดิน
       cp._movedSinceTurn = true;
@@ -101,33 +117,32 @@ export function handleGameAction(ws, msg) {
       // passive: ตาเหยี่ยว (archer) หมดเมื่อเดิน
       cp._hawkEyeActive = false;
       recomputeStats(cp);
-      // passive: นักสำรวจ (zhenghe) ทอง +1 พิเศษทุกครั้งที่เดินเข้า zone
-      if (cp.charId === "zhenghe" && targetCell.specialZone) {
-        cp.gold += 1;
-        pushLog(gs, `⛵ ${cp.name} นักสำรวจ: ทอง+1 พิเศษ`, "event");
-      }
-      pushLog(gs, `🚶 ${cp.name} → (${col},${row})`, "");
+      // เส้นทางจริง → ส่งให้ client เล่นอนิเมชันเดินทีละช่อง
+      cp._moveTrail = { id: (gs._moveSeq = (gs._moveSeq || 0) + 1), path: trail };
+      pushLog(gs, `🚶 ${cp.name} → (${landed.col}, ${landed.row})` + (trapped ? " (หยุดเพราะกับดัก!)" : ""), "");
 
-      // king skill: shadow_hunt / iron_fortress ข้ามผลกระทบ zone
-      if (!cp._skipZoneEffect) {
-        const hpBefore = cp.hp;
-        applyZoneEffectServer(cp, targetCell, gs);
-        // passive: พรแสงสว่าง (cleric) / รู้จักสมุนไพร (herbalist) — bonus +1 HP เมื่อ zone รักษา
-        const healed = cp.hp - hpBefore;
-        if (healed > 0 && (cp.charId === "cleric" || cp.charId === "herbalist")) {
-          cp.hp = Math.min(cp.maxHp, cp.hp + 1);
-          pushLog(gs, `✨ ${cp.name} passive: HP+1 พิเศษจากสมุนไพร`, "heal");
+      // ผลของช่องที่หยุดยืน — เฉพาะถ้ายังไม่ตายและไม่ถูกกับดักหยุดกลางทาง
+      if (cp.alive && !trapped && startKey !== `${landed.col},${landed.row}`) {
+        // passive: นักสำรวจ (zhenghe) ทอง +1 พิเศษเมื่อเดินเข้า zone
+        if (cp.charId === "zhenghe" && landed.specialZone) {
+          cp.gold += 1;
+          pushLog(gs, `⛵ ${cp.name} นักสำรวจ: ทอง+1 พิเศษ`, "event");
         }
-        applyRandomZoneEvent(cp, targetCell, gs);
-      } else {
-        cp._skipZoneEffect = false;
-        pushLog(gs, `🌑 ${cp.name} ข้ามผลกระทบ zone (สกิลราชา)`, "event");
-      }
-      checkQuestProgress(cp, targetCell, gs);
-
-      // กับดัก — ใครก็ตามที่เดินเข้ามา (รวมเจ้าของ) โดนผลทั้งหมด แล้วกับดักหายไป
-      if (targetCell.trap) {
-        triggerTrap(gs, cp, targetCell, CARD_CTX);
+        // king skill: shadow_hunt / iron_fortress ข้ามผลกระทบ zone
+        if (!cp._skipZoneEffect) {
+          const hpBefore = cp.hp;
+          applyZoneEffectServer(cp, landed, gs);
+          const healed = cp.hp - hpBefore;
+          if (healed > 0 && (cp.charId === "cleric" || cp.charId === "herbalist")) {
+            cp.hp = Math.min(cp.maxHp, cp.hp + 1);
+            pushLog(gs, `✨ ${cp.name} passive: HP+1 พิเศษจากสมุนไพร`, "heal");
+          }
+          applyRandomZoneEvent(cp, landed, gs);
+        } else {
+          cp._skipZoneEffect = false;
+          pushLog(gs, `🌑 ${cp.name} ข้ามผลกระทบ zone (สกิลราชา)`, "event");
+        }
+        checkQuestProgress(cp, landed, gs);
       }
       broadcastGameState(info.code);
       break;

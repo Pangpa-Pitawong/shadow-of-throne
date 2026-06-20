@@ -43,6 +43,37 @@ export function getReachableServer(startCol, startRow, steps, cells) {
   return new Set(getReachableCostMap(startCol, startRow, steps, cells).keys());
 }
 
+// คืน "เส้นทางต้นทุนต่ำสุด" จากต้นทางถึงเป้าหมาย (รวมช่องต้นทางเป็นช่องแรก)
+//   ใช้ให้ server เดินผ่านทีละช่อง → ทริกเกอร์กับดักระหว่างทาง (ไม่วาปข้าม)
+//   คืน null ถ้าเป้าหมายไกลเกินงบเดิน
+export function getPath(startCol, startRow, steps, targetCol, targetRow, cells) {
+  const cellMap = {};
+  for (const c of cells) cellMap[c.key] = c;
+  const startKey = `${startCol},${startRow}`, targetKey = `${targetCol},${targetRow}`;
+  if (!cellMap[targetKey]) return null;
+  const dist = new Map([[startKey, 0]]);
+  const prev = new Map();
+  const pq = [{ key: startKey, cost: 0 }];
+  while (pq.length) {
+    pq.sort((a, b) => a.cost - b.cost);
+    const { key, cost } = pq.shift();
+    if (cost > (dist.get(key) ?? Infinity)) continue;
+    const cell = cellMap[key]; if (!cell) continue;
+    for (const nk of getNeighborKeys(cell.col, cell.row, cellMap, false)) {
+      const n = cellMap[nk];
+      const nc = cost + (TERRAIN_MOVE_COST[n.terrain] || 1);
+      if (nc <= steps && nc < (dist.get(nk) ?? Infinity)) {
+        dist.set(nk, nc); prev.set(nk, key); pq.push({ key: nk, cost: nc });
+      }
+    }
+  }
+  if (!dist.has(targetKey)) return null;
+  const path = [];
+  let k = targetKey;
+  while (k !== undefined) { path.unshift(cellMap[k]); if (k === startKey) break; k = prev.get(k); }
+  return { cells: path, cost: dist.get(targetKey) };
+}
+
 export function hexDistanceServer(aCol, aRow, bCol, bRow) {
   // SQUARE grid 8 ทิศ → Chebyshev distance
   return Math.max(Math.abs(aCol - bCol), Math.abs(aRow - bRow));

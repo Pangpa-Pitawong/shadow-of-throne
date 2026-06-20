@@ -225,11 +225,12 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 /* battlefield smoke vignette over the hex map */
 .map-area::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:2;
   box-shadow:inset 0 0 120px 40px rgba(7,6,5,.85)}
-.map-area>*:not(.right-strip):not(.right-panel):not(.card-drawer){position:relative;z-index:1}
+.map-area>*:not(.right-strip):not(.right-panel):not(.card-drawer):not(.hand-rail){position:relative;z-index:1}
 /* overlay elements inside map-area keep their absolute positioning */
 .map-area>.right-strip{position:absolute!important;z-index:20!important}
 .map-area>.right-panel{position:absolute!important;z-index:10!important;pointer-events:none}
 .map-area>.card-drawer{position:absolute!important;z-index:25!important}
+.map-area>.hand-rail{position:absolute!important;z-index:24!important}
 
 /* ── TOP BAR — imperial silk banner ── */
 .top-bar{background:linear-gradient(180deg,#1d160e,#120d08);
@@ -259,6 +260,35 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 .p-ico{background:radial-gradient(circle at 35% 30%,rgba(201,168,76,.25),rgba(0,0,0,.5));
   box-shadow:0 0 0 1px rgba(201,168,76,.35)}
 
+/* ── ตาเดินของผู้เล่น — ไฮไลต์ชัดว่าใครได้เดิน ── */
+.pcard.active{animation:turnPulse 1.6s ease-in-out infinite}
+@keyframes turnPulse{
+  0%,100%{box-shadow:0 0 12px rgba(201,168,76,.22),inset 0 0 0 1px rgba(201,168,76,.28)}
+  50%{box-shadow:0 0 22px rgba(201,168,76,.5),inset 0 0 0 1.5px rgba(240,208,128,.6)}}
+.pcard.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:8px 0 0 8px;
+  background:linear-gradient(180deg,var(--gold-l),var(--gold),var(--vermillion))}
+.turn-ribbon{position:absolute;top:-1px;right:-1px;background:linear-gradient(135deg,var(--gold),var(--vermillion));
+  color:#1a0d05;font-family:'Cinzel',serif;font-size:8px;font-weight:700;letter-spacing:.06em;
+  padding:2px 7px;border-radius:0 8px 0 8px;box-shadow:0 1px 5px rgba(0,0,0,.5);z-index:2}
+
+/* ── เหรียญค่าพลัง สไตล์ Armello ── */
+.p-statbar{display:flex;gap:4px;margin-top:7px;justify-content:space-between}
+.stat-coin{flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;
+  background:radial-gradient(circle at 50% 30%,rgba(201,168,76,.16),rgba(0,0,0,.35));
+  border:1px solid rgba(201,168,76,.3);border-radius:7px;padding:3px 1px;min-width:0}
+.stat-coin.gold{border-color:rgba(240,208,128,.5);background:radial-gradient(circle at 50% 30%,rgba(240,208,128,.22),rgba(0,0,0,.35))}
+.sc-ico{font-size:12px;line-height:1;filter:drop-shadow(0 1px 1px rgba(0,0,0,.5))}
+.sc-val{font-size:11px;font-weight:700;color:var(--gold-l);font-family:'Cinzel',serif;line-height:1.1}
+
+/* ── ช่องอุปกรณ์ กรอบทอง ── */
+.equip-row{display:flex;gap:4px;margin-top:7px}
+.equip-slot{width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:14px;
+  border-radius:6px;flex-shrink:0}
+.equip-slot.filled{background:radial-gradient(circle at 40% 30%,rgba(201,168,76,.28),rgba(20,14,8,.7));
+  border:1.5px solid var(--gold);box-shadow:0 0 8px rgba(201,168,76,.3),inset 0 0 0 1px rgba(255,255,255,.12)}
+.equip-slot.empty{background:rgba(0,0,0,.25);border:1px dashed rgba(201,168,76,.3);color:rgba(201,168,76,.4);font-size:13px}
+.p-passive{font-size:9px;color:var(--txt-d);margin-top:5px;opacity:.85}
+
 /* ── ACTION BUTTONS — bronze war tokens ── */
 .act-btn{background:linear-gradient(165deg,#221a10,#15100a);border-color:rgba(201,168,76,.2)}
 .act-btn:hover:not(:disabled){border-color:var(--gold-l);background:linear-gradient(165deg,#352713,#1d1409);
@@ -285,6 +315,36 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 
 /* ── DRAW DECK — keep dark lacquer ── */
 .draw-deck{background:linear-gradient(135deg,#1c2a4a,#0c1326)!important}
+
+/* ═══ CARD RAIL — มือผู้เล่นติดขอบขวา (สไตล์ Armello) ═══════════════════════════ */
+.hand-rail{position:absolute;top:58px;right:52px;bottom:62px;width:160px;z-index:24;
+  display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}
+.hand-rail.collapsed .rail-head,.hand-rail.collapsed .rail-list,
+.hand-rail.collapsed .rail-use,.hand-rail.collapsed .rail-warn{display:none}
+.rail-head,.rail-warn,.rail-use{pointer-events:auto}
+.rail-head{display:flex;gap:8px;align-items:center;font-family:'Cinzel',serif;font-size:10px;color:var(--gold-l);
+  background:rgba(12,9,6,.82);border:1px solid rgba(201,168,76,.25);border-radius:7px;padding:4px 9px}
+.rail-deck{background:linear-gradient(135deg,#4cc94c,#2a8b2a);color:#06220c;border:none;border-radius:5px;
+  padding:2px 8px;font-size:9px;font-weight:700;cursor:pointer;animation:glow 1s ease-in-out infinite}
+.rail-warn{font-size:9px;color:#ff9a9a;background:rgba(40,10,10,.78);border:1px solid rgba(201,64,64,.45);
+  border-radius:6px;padding:3px 9px}
+.rail-list{pointer-events:none;display:flex;flex-direction:column;gap:5px;align-items:flex-end;overflow:visible}
+.rail-empty{pointer-events:auto;font-size:10px;color:var(--txt-d);background:rgba(12,9,6,.7);padding:6px 10px;border-radius:6px}
+.rail-use{width:160px;font-size:11px;padding:7px;margin-top:2px}
+/* การ์ดในราง = แนวนอน, ปกติเห็นแค่ไอคอน+ชื่อ; ชี้เมาส์ → เด้งออกซ้าย + กางคำอธิบาย */
+.rail-list .hand-card{pointer-events:auto;display:flex;flex-wrap:wrap;align-items:center;column-gap:7px;
+  width:150px;min-width:150px;max-width:150px;text-align:left;padding:6px 9px;
+  transform:none;transform-origin:right center;transition:transform .18s,box-shadow .18s,border-color .18s}
+.rail-list .hand-card .card-ico{flex:0 0 26px;font-size:21px;margin:0;display:block;text-align:center}
+.rail-list .hand-card .card-nm{flex:1 1 90px;text-align:left;font-size:10px;line-height:1.15;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-list .hand-card .card-desc{flex:1 1 100%;text-align:left;font-size:8px;max-height:0;overflow:hidden;
+  margin:0;transition:max-height .2s,margin .2s}
+.rail-list .hand-card>div[style]{flex:1 1 100%;text-align:left}
+.rail-list .hand-card .card-rarity{top:3px;right:5px}
+.rail-list .hand-card:hover,.rail-list .hand-card.selected{
+  transform:translateX(-128px) scale(1.07);width:230px;min-width:230px;max-width:230px;z-index:40}
+.rail-list .hand-card:hover .card-desc,.rail-list .hand-card.selected .card-desc{max-height:90px;margin-top:4px}
 
 /* ── LOG — battle chronicle on dark silk ── */
 .log-entry.event{color:var(--gold-l)}

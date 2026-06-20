@@ -700,94 +700,72 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           {/* ── RIGHT PANEL OVERLAY — log บนแมพโปร่งใส ── */}
           <RightPanel log={log} />
 
-          {/* ── CARD DRAWER — slides from right ── */}
-          <div className={`card-drawer${showCards ? " open" : ""}`}>
-            <div className="card-drawer-inner">
-              <div className="drawer-title">
-                ไพ่ในมือ ({me?.hand?.length || 0}/{Math.min(10, Math.max(1, me?.hp || 1))})
-                {(actionsDone.cardsPlayed || 0) > 0 && (
-                  <span style={{ color: "var(--txt-m)", marginLeft: 6 }}>· ใช้แล้ว {actionsDone.cardsPlayed}/4</span>
-                )}
-              </div>
-              {/* กองจั่ว */}
-              <div className="drawer-deck-row">
-                <div
-                  className={`draw-deck${(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) ? " ready" : ""}`}
-                  onClick={() => (isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) && reopenDraw()}
-                  style={{ position:"relative", flexShrink:0, width:"44px", height:"62px", borderRadius:"7px",
-                    background:"linear-gradient(135deg,#1c2a4a,#0c1326)",
-                    border:`1px solid ${(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) ? "var(--gold)" : "rgba(201,168,76,.3)"}`,
-                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-                    cursor:(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) ? "pointer" : "default" }}
-                >
-                  <span style={{ fontSize:"18px" }}>🂠</span>
-                  <span style={{ fontSize:"7px", color:"var(--gold-l)", marginTop:"1px" }}>กองจั่ว</span>
-                </div>
-                <div style={{ fontSize:"10px", color:"var(--txt-m)", lineHeight:1.6, marginLeft:6 }}>
-                  {me?.pendingDiscard > 0
-                    ? <span style={{ color:"#e05050" }}>⚠ ต้องทิ้ง {me.pendingDiscard} ใบ</span>
-                    : <span>ATK {me?.atk || 0} · DEF {me?.def || 0}<br/>💰 {me?.gold || 0} · งบ {actionsDone.moveLeft ?? 0}</span>}
-                </div>
-              </div>
-              {/* Hand cards */}
-              <div className="drawer-hand">
-                {me?.hand?.map((card, ci) => (
-                  <HandCard
-                    key={card.uid || ci}
-                    card={card}
-                    isSelected={selectedCard?.uid === card.uid}
-                    isMyTurn={isMyTurn}
-                    onSelect={card => {
-                      setSelectedCard(card);
-                      setActionMode(null);
-                    }}
-                    onHover={e => setTooltip({ x: e.clientX + 10, y: e.clientY - 80, title: card.name, desc: card.desc || "" })}
-                    onLeave={() => setTooltip(null)}
-                  />
-                ))}
-                {(!me?.hand || me.hand.length === 0) && (
-                  <div style={{ color:"var(--txt-d)", fontSize:"11px", padding:"8px" }}>ไม่มีการ์ดในมือ</div>
-                )}
-              </div>
-              {/* Use card button — shows when card selected */}
-              {selectedCard && isMyTurn && (
-                <div style={{ flexShrink:0, padding:"6px 0 2px" }}>
-                  <button
-                    className="tb-btn primary"
-                    style={{ width:"100%", fontSize:"11px", padding:"7px" }}
-                    disabled={(actionsDone.cardsPlayed || 0) >= 4}
-                    onClick={() => {
-                      const c = selectedCard;
-                      if (!c || !isMyTurn || (actionsDone.cardsPlayed || 0) >= 4) return;
-                      if (c.type === "weapon") {
-                        onGameAction("use_card", { cardUid: c.uid });
-                        setSelectedCard(null); setActionMode(null); setShowCards(false);
-                        return;
-                      }
-                      if (c.type === "trap") { setActionMode(actionMode === "trap" ? null : "trap"); setShowCards(false); return; }
-                      const t = c.target || "enemy";
-                      if (t === "self" || t === "team" || t === "none") {
-                        onGameAction("use_card", { cardUid: c.uid });
-                        setSelectedCard(null); setActionMode(null); setShowCards(false);
-                        return;
-                      }
-                      if (t === "aoe") {
-                        const needsTile = c.aoeMode === "line" || (c.aoeMode === "pointRadius" && c.byTile);
-                        if (!needsTile) {
-                          onGameAction("use_card", { cardUid: c.uid });
-                          setSelectedCard(null); setActionMode(null); setShowCards(false);
-                          return;
-                        }
-                      }
-                      setActionMode(actionMode === "card" ? null : "card");
-                      setShowCards(false);
-                    }}
-                  >
-                    🃏 ใช้ "{selectedCard.name}" ({actionsDone.cardsPlayed || 0}/4)
-                  </button>
-                </div>
+          {/* ── CARD RAIL — มือผู้เล่นติดขอบขวา (เห็นตลอด) · ชี้เมาส์ = การ์ดเด้งออกแนวนอน ── */}
+          <div className={`hand-rail${showCards ? " collapsed" : ""}`}>
+            <div className="rail-head">
+              <span>🂠 {me?.hand?.length || 0}/{Math.min(10, Math.max(1, me?.hp || 1))}</span>
+              {(actionsDone.cardsPlayed || 0) > 0 && <span style={{ color:"var(--txt-m)" }}>ใช้ {actionsDone.cardsPlayed}/4</span>}
+              {(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) && (
+                <button className="rail-deck" onClick={reopenDraw} title="เปิดไพ่ที่จั่วได้">จั่ว!</button>
               )}
             </div>
+            {me?.pendingDiscard > 0 && (
+              <div className="rail-warn">⚠ ต้องทิ้ง {me.pendingDiscard} ใบ</div>
+            )}
+            {/* Hand cards — แนวนอน เด้งออกซ้ายเมื่อชี้ */}
+            <div className="rail-list">
+              {me?.hand?.map((card, ci) => (
+                <HandCard
+                  key={card.uid || ci}
+                  card={card}
+                  isSelected={selectedCard?.uid === card.uid}
+                  isMyTurn={isMyTurn}
+                  onSelect={card => {
+                    setSelectedCard(card);
+                    setActionMode(null);
+                  }}
+                  onHover={e => setTooltip({ x: e.clientX - 210, y: e.clientY - 40, title: card.name, desc: card.desc || "" })}
+                  onLeave={() => setTooltip(null)}
+                />
+              ))}
+              {(!me?.hand || me.hand.length === 0) && (
+                <div className="rail-empty">ไม่มีการ์ดในมือ</div>
+              )}
+            </div>
+            {/* Use card button — shows when card selected */}
+            {selectedCard && isMyTurn && (
+              <button
+                className="rail-use tb-btn primary"
+                disabled={(actionsDone.cardsPlayed || 0) >= 4}
+                onClick={() => {
+                  const c = selectedCard;
+                  if (!c || !isMyTurn || (actionsDone.cardsPlayed || 0) >= 4) return;
+                  if (c.type === "weapon") {
+                    onGameAction("use_card", { cardUid: c.uid });
+                    setSelectedCard(null); setActionMode(null);
+                    return;
+                  }
+                  if (c.type === "trap") { setActionMode(actionMode === "trap" ? null : "trap"); return; }
+                  const t = c.target || "enemy";
+                  if (t === "self" || t === "team" || t === "none") {
+                    onGameAction("use_card", { cardUid: c.uid });
+                    setSelectedCard(null); setActionMode(null);
+                    return;
+                  }
+                  if (t === "aoe") {
+                    const needsTile = c.aoeMode === "line" || (c.aoeMode === "pointRadius" && c.byTile);
+                    if (!needsTile) {
+                      onGameAction("use_card", { cardUid: c.uid });
+                      setSelectedCard(null); setActionMode(null);
+                      return;
+                    }
+                  }
+                  setActionMode(actionMode === "card" ? null : "card");
+                }}
+              >
+                🃏 ใช้ "{selectedCard.name}" ({actionsDone.cardsPlayed || 0}/4)
+              </button>
+            )}
           </div>
 
           {/* ── RIGHT STRIP — icon buttons ── */}
@@ -821,7 +799,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                 <div
                   className={`strip-btn${showCards ? " active-mode" : ""}${deckReady ? " active-mode" : ""}`}
                   onClick={() => setShowCards(v => !v)}
-                  title="ไพ่ในมือ"
+                  title="ซ่อน/แสดงไพ่ในมือ"
                 >
                   🃏
                   <label>ไพ่</label>

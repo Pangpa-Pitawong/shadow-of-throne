@@ -25,7 +25,11 @@ const ZONE_MODEL = {
 };
 // footprint อาคารเป็น "จำนวนช่อง" → สเกลโมเดลให้กว้างเท่ากับ footprint จริง (occupancy ตรง)
 const ZONE_TILES = { throne: 2.6, palace: 1.7, volcano: 1.6, market: 1.4, rebel_camp: 1.4, village: 1.3, cave: 1.3, dungeon: 1.3, oasis: 1.2, treasure: 1.0 };
-const ZONE_TILE_DEF = 1.15;
+const ZONE_TILE_DEF = 0.95;
+// ครึ่งความกว้างผิวช่อง (ช่องกว้าง 0.98) — โมเดล "ตัวเดี่ยว/พร็อพ" ต้องอยู่ในกรอบนี้ทั้งหมด ไม่ล้นขอบ
+const TILE_HALF = 0.46;
+// ฐานล้นได้เฉพาะอาคารหลายช่อง (จองช่องข้างไว้แล้ว) — นอกเหนือจากนี้ทุกโมเดลถูกบีบให้พอดีช่อง
+const MULTI_TILE_ZONE = new Set(["throne", "palace", "volcano", "market", "rebel_camp", "village", "cave", "dungeon", "oasis"]);
 // โมเดลตกแต่งภูมิประเทศ — มีทั้ง "ตัวเดี่ยว" (พอดี 1 ช่อง) และ "กลุ่ม" (ของชิ้นใหญ่ วางกลางช่อง ล้นขอบได้แต่ฐานไม่ลอย)
 const PROP = {
   tree: "Resource_Tree1", treeG: "Resource_Tree_Group",
@@ -107,6 +111,7 @@ export default function IslandMap3D(props) {
       boardGroup, propGroup, tokenGroup, hlGroup, raycaster, ptr, clock,
       tiles: [], cellWorld: new Map(), templates: {}, modelsReady: false,
       GS: 0.5, boardSig: "", boardRadius: 10, animers: [], hoverKey: null,
+      tokenByIdx: new Map(), walks: new Map(), seenTrail: {}, firstTokenBuild: true,
     };
 
     const loader = new GLTFLoader();
@@ -164,6 +169,18 @@ export default function IslandMap3D(props) {
         else if (a.type === "ring") a.obj.rotation.z = t * 1.5;
         else if (a.type === "pend") a.obj.material.opacity = 0.35 + Math.abs(Math.sin(t * 4)) * 0.4;
       }
+      // ── เดินทีละช่อง: เลื่อนโทเคนผ่าน waypoints (ทับ bob ของ turn) ──
+      if (R.current.walks.size) {
+        for (const [idx, wlk] of R.current.walks) {
+          const tok = R.current.tokenByIdx.get(idx); if (!tok) { R.current.walks.delete(idx); continue; }
+          const n = wlk.pts.length; const p = Math.min(1, (t - wlk.t0) / wlk.dur);
+          const f = p * (n - 1); const seg = Math.min(n - 2, Math.floor(f)); const lt = f - seg;
+          const a = wlk.pts[seg], b = wlk.pts[seg + 1] || a;
+          tok.position.set(a.x + (b.x - a.x) * lt, (a.y + (b.y - a.y) * lt) + Math.sin(p * Math.PI * n) * 0.12, a.z + (b.z - a.z) * lt);
+          tok.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
+          if (p >= 1) R.current.walks.delete(idx);
+        }
+      }
       controls.update(); renderer.render(scene, cam);
     };
     loop();
@@ -188,7 +205,7 @@ export default function IslandMap3D(props) {
   }, [props.cells]);
 
   useEffect(() => { if (R.current.ready && R.current.cellWorld.size) frameCamera(R.current); /* eslint-disable-next-line */ }, [props.recenter]);
-  useEffect(() => { if (R.current.ready) rebuildTokens(); /* eslint-disable-next-line */ }, [props.players, props.currentTurn]);
+  useEffect(() => { if (R.current.ready) { animateTrails(); rebuildTokens(); } /* eslint-disable-next-line */ }, [props.players, props.currentTurn]);
   useEffect(() => { if (R.current.ready) rebuildHighlights(); /* eslint-disable-next-line */ },
     [props.reachableCells, props.attackableCells, props.trapCells, props.skillTargetCells, props.selectedCell, props.pendingMove, props.cells]);
 
@@ -232,7 +249,8 @@ export default function IslandMap3D(props) {
         const mn = ZONE_MODEL[c.specialZone], tpl = mn && r.templates[mn];
         if (tpl) {
           const o = tpl.clone(true);
-          const tiles = ZONE_TILES[c.specialZone] || ZONE_TILE_DEF;
+          // อาคารหลายช่องจองช่องข้างไว้แล้ว → กว้างได้ตาม footprint; อาคารช่องเดียวบีบให้พอดีช่อง (ไม่ล้นขอบ)
+          const tiles = Math.min(ZONE_TILES[c.specialZone] || ZONE_TILE_DEF, MULTI_TILE_ZONE.has(c.specialZone) ? 99 : TILE_HALF * 2);
           o.scale.setScalar(tiles / Math.max(0.4, tpl.userData.fp)); // กว้างเท่า footprint จริง
           o.position.set(wx, hgt - 0.05, wz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
           o.rotation.y = Math.floor(rhash(c.col + 7, c.row + 3) * 4) * Math.PI / 2;
@@ -286,9 +304,14 @@ export default function IslandMap3D(props) {
     const mn = PROP[key]; const tpl = mn && r.templates[mn];
     if (!tpl) return;
     const o = tpl.clone(true);
-    o.scale.setScalar(r.GS * (PROP_SCALE[key] || 0.55));
-    // jitter เล็ก + ของชิ้นใหญ่เกือบกลางช่อง → ปลายไม่โผล่พ้นขอบจนดูลอยตอนติดหน้าผา
-    const half = BIG_PROP.has(key) ? 0.12 : 0.3;
+    // คำนวณก่อนวาง: ถ้าฐานโมเดล (footprint) กว้างเกินช่อง → บีบสเกลลงให้พอดีช่องเสมอ (กันล้นขอบ)
+    let s = r.GS * (PROP_SCALE[key] || 0.55);
+    const fp = tpl.userData.fp || 1;
+    if (fp * s > TILE_HALF * 2) s = (TILE_HALF * 2) / fp;
+    o.scale.setScalar(s);
+    // jitter ถูกจำกัดด้วย "ที่ว่างที่เหลือ" หลังหักครึ่ง footprint → ขอบโมเดลไม่มีทางเลยขอบช่อง
+    const room = Math.max(0, TILE_HALF - (fp * s) / 2);
+    const half = Math.min(BIG_PROP.has(key) ? 0.12 : 0.3, room);
     const jx = (rhash(c.col * 4 + idx + 1, c.row * 7) - 0.5) * half * 2;
     const jz = (rhash(c.col * 9, c.row * 5 + idx + 2) - 0.5) * half * 2;
     o.position.set(wx + jx, top - 0.08, wz + jz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
@@ -300,10 +323,11 @@ export default function IslandMap3D(props) {
   // ── PLAYER TOKENS ──────────────────────────────────────────────────────────
   function rebuildTokens() {
     const r = R.current; if (!r.ready || !r.cellWorld.size) return;
-    clear(r.tokenGroup);
+    clear(r.tokenGroup); r.tokenByIdx.clear();
     r.animers = r.animers.filter(a => a.type === "pend");
     const players = pr.current.players || [], ct = pr.current.currentTurn;
     players.forEach((p, i) => {
+      if (p.hiddenByFog) return; // ม่านหมอก: ไม่วาดโทเคน
       const cw = r.cellWorld.get(`${p.col},${p.row}`); if (!cw) return;
       const colr = new THREE.Color(p.playerColor || "#cccccc");
       const alive = p.alive !== false;
@@ -314,12 +338,33 @@ export default function IslandMap3D(props) {
       g.add(body, head);
       const ico = iconSprite(p.playerIcon || "🧑", "#ffffff", 0.9); ico.position.y = 1.35; g.add(ico);
       g.position.set(cw.x, cw.top, cw.z); r.tokenGroup.add(g);
+      r.tokenByIdx.set(i, g);
+      const wlk = r.walks.get(i); if (wlk) { const s = wlk.pts[0]; g.position.set(s.x, s.y, s.z); } // กำลังเดิน → เริ่มจากต้นทาง
       if (alive && i === ct) {
         const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.06, 8, 24), new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: 0xffd060, emissiveIntensity: 0.6 }));
         ring.rotation.x = Math.PI / 2; ring.position.set(cw.x, cw.top + 0.06, cw.z); r.hlGroup.add(ring);
         r.animers.push({ type: "turn", obj: g, baseY: cw.top }); r.animers.push({ type: "ring", obj: ring });
       }
     });
+  }
+
+  // ── เดินทีละช่อง: อ่าน _moveTrail (เส้นทางจริงจาก server) แล้วตั้งคิวเลื่อนโทเคน ──
+  function animateTrails() {
+    const r = R.current; if (!r.cellWorld.size) return;
+    const players = pr.current.players || [];
+    players.forEach((p, i) => {
+      const tr = p._moveTrail;
+      if (!tr || tr.id == null) return;
+      // ครั้งแรกที่โหลด/เข้าเกมกลางคัน — จดว่า "เห็นแล้ว" โดยไม่เล่นอนิเมชันย้อนหลัง
+      if (r.firstTokenBuild) { r.seenTrail[i] = tr.id; return; }
+      if (r.seenTrail[i] === tr.id) return;
+      r.seenTrail[i] = tr.id;
+      const pts = (tr.path || []).map(s => r.cellWorld.get(`${s.col},${s.row}`)).filter(Boolean)
+        .map(cw => ({ x: cw.x, y: cw.top, z: cw.z }));
+      if (pts.length < 2) return;
+      r.walks.set(i, { pts, t0: r.clock.getElapsedTime(), dur: (pts.length - 1) * 0.26 });
+    });
+    r.firstTokenBuild = false;
   }
 
   // ── HIGHLIGHTS ──────────────────────────────────────────────────────────────
@@ -338,7 +383,12 @@ export default function IslandMap3D(props) {
     (p.attackableCells || []).forEach(c => disk(c.key, HL.attack, 0.4));
     (p.skillTargetCells || []).forEach(c => disk(c.key, HL.skill, 0.45));
     (p.trapCells || []).forEach(c => disk(c.key, HL.trap, 0.4));
-    (p.cells || []).filter(c => c.trap).forEach(c => disk(c.key, HL.trap, 0.55, 0.02));
+    // กับดักบนแมพ — ปักธง 🪤 ให้เห็นชัดว่าช่องนี้มีกับดัก (ไม่ใช่แค่ไฮไลต์พื้น)
+    (p.cells || []).filter(c => c.trap).forEach(c => {
+      const cw = r.cellWorld.get(c.key); if (!cw) return;
+      disk(c.key, HL.trap, 0.5, 0.02);
+      r.hlGroup.add(trapFlag(cw.x, cw.top, cw.z));
+    });
     if (p.selectedCell) disk(p.selectedCell.key, HL.sel, 0.5, 0.03);
     if (p.pendingMove) disk(p.pendingMove.key, HL.pend, 0.6, 0.04, true);
   }
@@ -373,6 +423,16 @@ function groundFlag(wx, top, wz, color) {
   const flag = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.36, 0.05), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.6 }));
   flag.position.set(0.28, 1.4, 0); flag.castShadow = true;
   g.add(pole, flag); g.position.set(wx, top, wz); return g;
+}
+// ธงกับดัก — เสา + ผืนธงแดง + ไอคอน 🪤 ลอยเหนือช่อง (มองเห็นชัดจากทุกมุมกล้อง)
+function trapFlag(wx, top, wz) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0x2a1a12, roughness: 1 }));
+  pole.position.y = 0.6; pole.castShadow = true;
+  const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.04), new THREE.MeshStandardMaterial({ color: 0xe0962a, emissive: 0xc0531f, emissiveIntensity: 0.5, roughness: 0.7 }));
+  cloth.position.set(0.26, 1.0, 0); cloth.castShadow = true;
+  const ico = iconSprite("🪤", "#e0962a", 0.8); ico.position.y = 1.45;
+  g.add(pole, cloth, ico); g.position.set(wx, top, wz); return g;
 }
 function frameCamera(r) {
   const radius = (r.boardRadius && isFinite(r.boardRadius)) ? r.boardRadius : 10;
