@@ -11,6 +11,10 @@ import { EVENT_CARDS, drawEventCards } from "./src/game/constants/events.js";
 import { pickQuestChoices } from "./src/game/constants/quests.js";
 import { CHARACTERS } from "./src/game/constants/characters.js";
 import { ZONE_EVENT_POOL, ZONE_EVENT_EXCLUDED } from "./src/game/constants/zoneEvents.js";
+import { rooms, clients } from "./src/game/server/state.js";
+import { rnd, shuffle, makeUid } from "./src/game/server/util.js";
+import { DIRS8, getReachableCostMap, hexDistanceServer } from "./src/game/server/hex.js";
+import { MAP_SIZES, sanitizeMapConfig } from "./src/game/server/mapConfig.js";
 
 const PORT = process.env.PORT || 3001;
 
@@ -22,44 +26,8 @@ const MAX_CARDS_PER_TURN = 4;
 //   ถ้ายังเหลืองบ ก็เดินต่อได้เรื่อยๆ จนกว่างบจะหมด (เดินเป็นช่วงๆ ได้)
 const BASE_MOVE_BUDGET = 5;
 
-// ─── MAP CONFIG — ตั้งค่าภูมิประเทศ/สถานที่ตอนสร้างห้อง ───────────────────────
-//   amount ต่อภูมิประเทศ: 0=น้อย · 1=ปกติ · 2=มาก   (ตัวคูณน้ำหนักการสุ่ม)
-//   zoneDensity: 0=น้อย · 1=ปกติ · 2=มาก  (จำนวนสถานที่พิเศษบนแมพ)
-const DEFAULT_MAP_CFG = {
-  random: false,
-  terrain: { forest: 1, mountain: 1, desert: 1, swamp: 1, water: 1 },
-  zoneDensity: 1,
-  dangerZones: true,
-  shops: true,
-};
-// ขนาดแมพแบบพรีเซ็ต — medium = 13×11 (ขนาดเดิม, ไม่เปลี่ยนพฤติกรรม)
-// ขนาดแมพ — สเกลให้ใกล้ความละเอียดของ prototype island3d (เล็ก = baseline, กลาง/ใหญ่ ใหญ่ขึ้นตามสัดส่วน)
-const MAP_SIZES = {
-  small:  { cols: 23, rows: 19 },
-  medium: { cols: 29, rows: 24 },
-  large:  { cols: 35, rows: 29 },
-};
-
-function sanitizeMapConfig(cfg) {
-  const c = cfg && typeof cfg === "object" ? cfg : {};
-  const clampAmt = (v) => (v === 0 || v === 1 || v === 2 ? v : 1);
-  const t = c.terrain && typeof c.terrain === "object" ? c.terrain : {};
-  return {
-    random: !!c.random,
-    size: MAP_SIZES[c.size] ? c.size : "medium",
-    terrain: {
-      forest: clampAmt(t.forest), mountain: clampAmt(t.mountain),
-      desert: clampAmt(t.desert), swamp: clampAmt(t.swamp), water: clampAmt(t.water),
-    },
-    zoneDensity: clampAmt(c.zoneDensity),
-    dangerZones: c.dangerZones !== false,
-    shops: c.shops !== false,
-  };
-}
-
-// ─── State ──────────────────────────────────────────────────────────────────
-const rooms = {};
-const clients = new Map();
+// MAP CONFIG (DEFAULT_MAP_CFG, MAP_SIZES, sanitizeMapConfig) → server/mapConfig.js
+// State (rooms, clients) → server/state.js
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function genCode() {
@@ -106,15 +74,7 @@ function redactRoomFor(room, viewerIdx) {
   return clone;
 }
 
-const rnd = (n) => Math.floor(Math.random() * n) + 1; // ลูกเต๋า d-n (1..n)
-const shuffle = (arr) => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
+// rnd, shuffle, makeUid → server/util.js
 
 // ─── REDACT: ปกปิดข้อมูลลับรายผู้เล่น ────────────────────────────────────────
 //   • บทบาท: เห็นได้เฉพาะตัวเอง / พระราชา(เปิดเสมอ) / ผู้ที่ตายแล้ว(revealed)
@@ -231,7 +191,6 @@ const NEG_STATUS = new Set([
   "stun", "trip", "slow", "curse",
 ]);
 
-function makeUid() { return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 // จั่วการ์ดแบบถ่วงน้ำหนักตามความหายาก (% การจั่วตรงตามที่กำหนดใน RARITY)
 function drawRandomCard(pool = ALL_CARDS_POOL) {
   const card = drawWeighted(pool, Math.random);
@@ -408,53 +367,7 @@ function killPlayer(gs, p) {
   }
 }
 
-// ─── TERRAIN MOVEMENT ────────────────────────────────────────────────────────
-// ✅ เดินได้ทุกที่ — น้ำผ่านได้ (ต้นทุนสูง) ไม่ใช่ 99 (ผ่านไม่ได้) อีกต่อไป
-const TERRAIN_MOVE_COST = { plains: 1, forest: 2, mountain: 3, water: 3, desert: 2, swamp: 3 };
-
-const DIRS8 = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-function getNeighborKeys(col, row, cellMap, blockWater = true) {
-  // SQUARE grid 8 ทิศ (เดินทแยงได้)
-  return DIRS8
-    .map(([dc, dr]) => `${col + dc},${row + dr}`)
-    .filter(k => cellMap[k] && (!blockWater || cellMap[k].terrain !== "water"));
-}
-
-// คืน Map ของ key → ต้นทุนการเดินที่ถูกที่สุด (ใช้ตรวจระยะ + หักงบเดิน)
-function getReachableCostMap(startCol, startRow, steps, cells) {
-  const cellMap = {};
-  for (const c of cells) cellMap[c.key] = c;
-  const visited = new Map();
-  const startKey = `${startCol},${startRow}`;
-  visited.set(startKey, 0);
-  const queue = [{ key: startKey, cost: 0 }];
-  while (queue.length > 0) {
-    const { key, cost } = queue.shift();
-    const cell = cellMap[key];
-    if (!cell) continue;
-    for (const nk of getNeighborKeys(cell.col, cell.row, cellMap, false)) {
-      const neighbor = cellMap[nk];
-      if (!neighbor) continue;
-      const moveCost = TERRAIN_MOVE_COST[neighbor.terrain] || 1;
-      const newCost = cost + moveCost;
-      if (newCost <= steps && (!visited.has(nk) || visited.get(nk) > newCost)) {
-        visited.set(nk, newCost);
-        queue.push({ key: nk, cost: newCost });
-      }
-    }
-  }
-  visited.delete(startKey);
-  return visited;
-}
-
-function getReachableServer(startCol, startRow, steps, cells) {
-  return new Set(getReachableCostMap(startCol, startRow, steps, cells).keys());
-}
-
-function hexDistanceServer(aCol, aRow, bCol, bRow) {
-  // SQUARE grid 8 ทิศ → Chebyshev distance (ตรงกับ client hexMath)
-  return Math.max(Math.abs(aCol - bCol), Math.abs(aRow - bRow));
-}
+// TERRAIN MOVEMENT + grid distance → server/hex.js
 
 // ─── CARD ENGINE CONTEXT — ฉีด helper ของเกมให้ cardEngine.js ────────────────
 const CARD_CTX = {
