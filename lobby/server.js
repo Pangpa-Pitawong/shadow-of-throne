@@ -556,6 +556,34 @@ function createInitialGameState(room) {
   const shadowR = Math.max(1.9, maxR * 0.42);
   const highR = maxR * 0.72;
 
+  // ── สุ่ม "รูปทรงเกาะ" — แต่ละเกมหน้าตาเกาะต่างกัน (กลม/สี่แฉก/แหลม/เกาะคู่/หมู่เกาะ/พระจันทร์เสี้ยว) ──
+  //   coastValue คืนค่าระยะชายฝั่งแบบ normalize: <0.84 = แผ่นดินใน · 0.84–1.0 = ชายหาด · >1.0 = ทะเล
+  const ISLAND_SHAPES = ["round", "round", "clover", "peninsulas", "twin", "archipelago", "crescent"];
+  const islandShape = ISLAND_SHAPES[Math.floor(Math.random() * ISLAND_SHAPES.length)];
+  const shapePhase = Math.random() * Math.PI * 2;
+  const coastValue = (dx, dy) => {
+    const rad = Math.hypot(dx, dy);
+    const theta = Math.atan2(dy, dx);
+    switch (islandShape) {
+      case "clover":      return rad / (1 + 0.18 * Math.cos(3 * theta + shapePhase));      // สี่แฉกมน
+      case "peninsulas":  return rad / (1 + 0.26 * Math.cos(5 * theta + shapePhase));      // แหลมยื่น 5 ทิศ
+      case "twin":        return Math.min(Math.hypot((dx - 0.42) / 0.82, dy / 0.92),       // เกาะคู่
+                                          Math.hypot((dx + 0.42) / 0.82, dy / 0.92));
+      case "archipelago": return rad * 0.78;                                               // แกนเล็ก + noise แรง → หมู่เกาะ
+      case "crescent": {                                                                    // พระจันทร์เสี้ยว (เว้าด้านเดียว)
+        const bx = Math.cos(shapePhase) * 0.95, by = Math.sin(shapePhase) * 0.95;
+        return Math.max(rad, 1.18 - Math.hypot(dx - bx, dy - by));
+      }
+      default:            return rad;                                                       // กลม (ก้อนออร์แกนิก)
+    }
+  };
+  const coastNoiseAmp = islandShape === "archipelago" ? 0.78 : 0.5;
+
+  // ── ความสูง "พื้นฐานตามไบโอม" — ทะเลทราย=ราบต่ำเรียบ · หญ้า=ที่ราบ · ป่า=เนิน · หิมะ=เทือกเขาสูง ──
+  //   base = ความสูงพื้น · hill = ความแรงของเนินสุ่ม (smoothing จะ cap ตามระยะถึงทะเล → ไบโอม base ต่ำจะเตี้ย/เรียบกว่า)
+  const BIOME_BASE = { grass: 1.0, forest: 1.8, desert: 0.2, snow: 2.8 };
+  const BIOME_HILL = { grass: 1.4, forest: 2.2, desert: 0.7, snow: 3.2 };
+
   // ── 1) ไบโอม + แนวชายฝั่งหยัก (organic) + "ความสูงดิบ" (raw height field) ──
   //   ใช้ central peak (บัลลังก์) + เนินสุ่ม แล้วค่อย smooth ทีหลังให้เป็นลาดธรรมชาติ
   const info = {};
@@ -563,7 +591,7 @@ function createInitialGameState(room) {
   for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
     const d = Math.hypot(col - cx, row - cy);
     const dx = (col - cx) / (cx + 0.5), dy = (row - cy) / (cy + 0.5);
-    const coast = Math.hypot(dx, dy) + (snoise(col * 0.6 + 5, row * 0.6 + 9) - 0.5) * 0.5;
+    const coast = coastValue(dx, dy) + (snoise(col * 0.6 + 5, row * 0.6 + 9) - 0.5) * coastNoiseAmp;
     const bm = quadrant(col, row);
     let biome, terrain, rawH;
     if (coast > 1.0 && d > shadowR) { biome = "water"; terrain = "water"; rawH = 0; }
@@ -574,9 +602,10 @@ function createInitialGameState(room) {
       if (beach) { biome = bm === "snow" ? "snow" : "beach"; terrain = "plains"; rawH = 0; }
       else {
         biome = bm; terrain = bm === "forest" ? "forest" : bm === "desert" ? "desert" : "plains";
-        const central = Math.max(0, 1 - d / (shadowR * 1.8)) * 2.5; // ค่อยๆ สูงเข้าหากลาง
-        const hills = snoise(col * 0.34 + 9, row * 0.34 + 3) * 2.6; // เนินสุ่ม
-        rawH = 1 + central + hills;
+        // ความสูง = ฐานไบโอม + ยกเข้าหากลางแบบนุ่ม + เนินสุ่ม (สเกลตามไบโอม) → smoothing จะแกะเป็นลาดขั้นบันได
+        const central = Math.max(0, 1 - d / (shadowR * 1.9)) * 1.5;
+        const hills = snoise(col * 0.34 + 9, row * 0.34 + 3) * (BIOME_HILL[bm] || 1.4);
+        rawH = (BIOME_BASE[bm] || 1.0) + central + hills;
       }
     }
     info[`${col},${row}`] = { biome, terrain, rawH, elev: 0 };

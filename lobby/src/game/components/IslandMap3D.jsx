@@ -26,8 +26,18 @@ const ZONE_MODEL = {
 // footprint อาคารเป็น "จำนวนช่อง" → สเกลโมเดลให้กว้างเท่ากับ footprint จริง (occupancy ตรง)
 const ZONE_TILES = { throne: 2.6, palace: 1.7, volcano: 1.6, market: 1.4, rebel_camp: 1.4, village: 1.3, cave: 1.3, dungeon: 1.3, oasis: 1.2, treasure: 1.0 };
 const ZONE_TILE_DEF = 1.15;
-// โมเดลตกแต่งภูมิประเทศ — ใช้ "ตัวเดี่ยว" (ไม่ใช่ group) เพื่อให้ขนาดพอดี 1 ช่อง ไม่ล้น/ลอย
-const PROP = { tree: "Resource_Tree1", pine: "Resource_PineTree", rock: "Resource_Rock_2", rockG: "Rock", gold: "Resource_Gold_2", mtn: "Mountain_Single" };
+// โมเดลตกแต่งภูมิประเทศ — มีทั้ง "ตัวเดี่ยว" (พอดี 1 ช่อง) และ "กลุ่ม" (ของชิ้นใหญ่ วางกลางช่อง ล้นขอบได้แต่ฐานไม่ลอย)
+const PROP = {
+  tree: "Resource_Tree1", treeG: "Resource_Tree_Group",
+  pine: "Resource_PineTree", pineG: "Resource_PineTree_Group",
+  rock: "Resource_Rock_2", rock2: "Rock", rockG: "Rock_Group",
+  gold: "Resource_Gold_2", mtn: "Mountain_Single", mtnL: "MountainLarge_Single",
+  logs: "Logs",
+};
+// ของชิ้นใหญ่ → อยู่กลางช่อง (jitter น้อย) เพื่อไม่ให้ปลายโผล่พ้นขอบช่องแล้วดูลอยเวลาติดหน้าผา
+const BIG_PROP = new Set(["treeG", "pineG", "rockG", "mtn", "mtnL"]);
+// สเกลต่อชนิด (× r.GS) — กลุ่ม/ภูเขาเล็กลงนิดให้ไม่ล้นเกินไป
+const PROP_SCALE = { tree: 0.7, treeG: 0.6, pine: 0.72, pineG: 0.58, rock: 0.5, rock2: 0.52, rockG: 0.6, gold: 0.5, mtn: 0.8, mtnL: 0.92, logs: 0.5 };
 
 const HL = { reach: 0x4cc94c, attack: 0xe24b4a, trap: 0xe0962a, skill: 0xa060e0, sel: 0xc9a84c, pend: 0x7CFC7C };
 const frac = (n) => n - Math.floor(n);
@@ -224,7 +234,7 @@ export default function IslandMap3D(props) {
           const o = tpl.clone(true);
           const tiles = ZONE_TILES[c.specialZone] || ZONE_TILE_DEF;
           o.scale.setScalar(tiles / Math.max(0.4, tpl.userData.fp)); // กว้างเท่า footprint จริง
-          o.position.set(wx, hgt, wz); // ฐานอยู่บนผิวช่องพอดี
+          o.position.set(wx, hgt - 0.05, wz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
           o.rotation.y = Math.floor(rhash(c.col + 7, c.row + 3) * 4) * Math.PI / 2;
           if (c.specialZone === "throne") {
             o.traverse(n => { if (n.isMesh) { n.material = n.material.clone(); n.material.color.multiplyScalar(0.5); n.material.color.lerp(new THREE.Color(0x6a3aa0), 0.45); n.material.emissive = new THREE.Color(0x6a3aa0); n.material.emissiveIntensity = 0.4; } });
@@ -238,35 +248,50 @@ export default function IslandMap3D(props) {
         continue; // ช่องอาคาร: ไม่วางพร็อพทับ
       }
       if (c.reserved) continue; // footprint บัลลังก์: เว้นไว้
-      const pk = propKind(biome, c);
-      if (pk) { const n = pk === "tree" ? 2 : 1; for (let i = 0; i < n; i++) placeProp(r, pk, wx, hgt, wz, c, i); }
+      const kinds = propKinds(biome, c);
+      kinds.forEach((pk, i) => placeProp(r, pk, wx, hgt, wz, c, i));
     }
     frameCamera(r);
   }
 
-  function propKind(biome, c) {
+  // คืน "ลิสต์พร็อพ" 0–3 ชิ้นต่อช่อง — เพิ่มความหนาแน่นให้แต่ละโซนไม่โล่ง พร้อมความหลากหลายของชนิด
+  function propKinds(biome, c) {
     const hv = rhash(c.col, c.row);
-    if (biome === "forest") return "tree";
-    if (biome === "snow") return hv < 0.55 ? "pine" : (hv < 0.72 ? "rock" : null);
-    if (biome === "desert") return hv < 0.28 ? "rock" : (hv < 0.36 ? "gold" : null);
-    if (biome === "shadow") return hv < 0.4 ? "rockGdark" : null;
-    if (biome === "lava") return hv < 0.5 ? "rockGdark" : null;
-    if (biome === "grass") return hv < 0.22 ? "tree" : null;
-    if (biome === "beach" || biome === "water") return null;
-    if (c.terrain === "mountain" && biome !== "throne") return hv < 0.5 ? "rockG" : "mtn";
-    return null;
+    const hv2 = rhash(c.col + 31, c.row + 17);
+    const hv3 = rhash(c.col + 53, c.row + 71);
+    const out = [];
+    if (biome === "forest") {
+      out.push("tree"); if (hv < 0.55) out.push("tree"); if (hv2 < 0.3) out.push(hv2 < 0.14 ? "pine" : "rock"); if (hv3 < 0.12) out.push("logs");
+    } else if (biome === "snow") {
+      if (hv < 0.7) out.push("pine"); if (hv < 0.28) out.push("pine"); if (hv2 < 0.42) out.push("rock"); if (hv3 < 0.14) out.push("rockG");
+    } else if (biome === "desert") {
+      if (hv < 0.5) out.push("rock"); if (hv2 < 0.2) out.push("gold"); if (hv3 < 0.3) out.push("rock2"); if (hv > 0.88) out.push("mtn");
+    } else if (biome === "grass") {
+      if (hv < 0.42) out.push("tree"); if (hv2 < 0.24) out.push("rock"); if (hv3 < 0.16) out.push("tree"); if (hv > 0.93) out.push("logs");
+    } else if (biome === "shadow") {
+      if (hv < 0.6) out.push("rockGdark"); if (hv2 < 0.34) out.push("rock2dark");
+    } else if (biome === "lava") {
+      if (hv < 0.6) out.push("rockGdark"); if (hv2 < 0.3) out.push("rockdark");
+    } else if (biome === "beach") {
+      if (hv < 0.14) out.push("rock");
+    }
+    if (c.terrain === "mountain" && biome !== "throne" && biome !== "shadow") {
+      out.push(hv < 0.5 ? "rockG" : "mtn");
+    }
+    return out;
   }
   function placeProp(r, kind, wx, top, wz, c, idx = 0) {
-    const dark = kind === "rockGdark";
-    const key = dark ? "rockG" : kind;
+    const dark = kind.endsWith("dark");
+    const key = dark ? kind.slice(0, -4) : kind;
     const mn = PROP[key]; const tpl = mn && r.templates[mn];
     if (!tpl) return;
     const o = tpl.clone(true);
-    const scl = (kind === "tree" || kind === "pine") ? 0.7 : (kind === "mtn" ? 0.8 : 0.55);
-    o.scale.setScalar(r.GS * scl);
-    const jx = (rhash(c.col * 4 + idx + 1, c.row * 7) - 0.5) * 0.42;
-    const jz = (rhash(c.col * 9, c.row * 5 + idx + 2) - 0.5) * 0.42;
-    o.position.set(wx + jx, top, wz + jz);
+    o.scale.setScalar(r.GS * (PROP_SCALE[key] || 0.55));
+    // jitter เล็ก + ของชิ้นใหญ่เกือบกลางช่อง → ปลายไม่โผล่พ้นขอบจนดูลอยตอนติดหน้าผา
+    const half = BIG_PROP.has(key) ? 0.12 : 0.3;
+    const jx = (rhash(c.col * 4 + idx + 1, c.row * 7) - 0.5) * half * 2;
+    const jz = (rhash(c.col * 9, c.row * 5 + idx + 2) - 0.5) * half * 2;
+    o.position.set(wx + jx, top - 0.08, wz + jz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
     o.rotation.y = rhash(c.col + idx * 3 + 2, c.row + 5) * Math.PI * 2;
     if (dark) o.traverse(n => { if (n.isMesh) { n.material = n.material.clone(); n.material.color.multiplyScalar(0.5); n.material.color.lerp(new THREE.Color(0x5a3a8a), 0.4); } });
     r.propGroup.add(o);
