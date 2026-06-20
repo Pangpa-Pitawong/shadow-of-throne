@@ -2627,6 +2627,8 @@ server.listen(PORT, "0.0.0.0", () => {
 }
 
 export { createInitialGameState, sanitizeMapConfig, MAP_SIZES };
+// test seams (used by smoke.mjs; no effect on the running server)
+export { handleGameAction, handleLeave, rooms, clients };
 
 // ─── Keep-alive (กัน Render free tier หลับหลังไม่มีคนใช้ ~15 นาที) ───────────────
 // Render ตั้ง RENDER_EXTERNAL_URL ให้อัตโนมัติ → self-ping /health ทุก 10 นาที
