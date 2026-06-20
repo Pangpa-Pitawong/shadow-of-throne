@@ -33,10 +33,11 @@ const DEFAULT_MAP_CFG = {
   shops: true,
 };
 // ขนาดแมพแบบพรีเซ็ต — medium = 13×11 (ขนาดเดิม, ไม่เปลี่ยนพฤติกรรม)
+// ขนาดแมพ — สเกลให้ใกล้ความละเอียดของ prototype island3d (เล็ก = baseline, กลาง/ใหญ่ ใหญ่ขึ้นตามสัดส่วน)
 const MAP_SIZES = {
-  small:  { cols: 11, rows: 9 },
-  medium: { cols: 13, rows: 11 },
-  large:  { cols: 15, rows: 13 },
+  small:  { cols: 23, rows: 19 },
+  medium: { cols: 29, rows: 24 },
+  large:  { cols: 35, rows: 29 },
 };
 
 function sanitizeMapConfig(cfg) {
@@ -555,30 +556,45 @@ function createInitialGameState(room) {
   const shadowR = Math.max(1.9, maxR * 0.42);
   const highR = maxR * 0.72;
 
-  // ขอบเกาะหยักธรรมชาติ (organic) — ช่องนอกรัศมี+noise = ทะเล (สุ่มรูปทรงไม่ซ้ำทุกเกม)
+  // ── 1) ไบโอม + แนวชายฝั่งหยัก (organic) + "ความสูงดิบ" (raw height field) ──
+  //   ใช้ central peak (บัลลังก์) + เนินสุ่ม แล้วค่อย smooth ทีหลังให้เป็นลาดธรรมชาติ
   const info = {};
+  const PEAK = Math.min(7, Math.max(4, Math.round(maxR * 0.55)));
   for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
     const d = Math.hypot(col - cx, row - cy);
     const dx = (col - cx) / (cx + 0.5), dy = (row - cy) / (cy + 0.5);
-    const coast = Math.hypot(dx, dy) + (snoise(col * 0.6 + 5, row * 0.6 + 9) - 0.5) * 0.55;
+    const coast = Math.hypot(dx, dy) + (snoise(col * 0.6 + 5, row * 0.6 + 9) - 0.5) * 0.5;
     const bm = quadrant(col, row);
-    let biome, elev, terrain;
-    if (coast > 1.0 && d > shadowR) { biome = "water"; elev = 0; terrain = "water"; } // ทะเลล้อมเกาะ
-    else if (d < throneR) { biome = "throne"; elev = 4 + Math.round(throneR - d); terrain = "mountain"; }
-    else if (d < shadowR) { biome = "shadow"; elev = 3; terrain = "mountain"; }
+    let biome, terrain, rawH;
+    if (coast > 1.0 && d > shadowR) { biome = "water"; terrain = "water"; rawH = 0; }
+    else if (d < throneR) { biome = "throne"; terrain = "mountain"; rawH = PEAK; }
+    else if (d < shadowR) { biome = "shadow"; terrain = "mountain"; rawH = PEAK - 2; }
     else {
-      const beach = coast > 0.82; // แนวชายหาด/ชายฝั่งหิมะ
-      if (beach) { biome = bm === "snow" ? "snow" : "beach"; elev = bm === "snow" ? 1 : 0; terrain = "plains"; }
+      const beach = coast > 0.84;
+      if (beach) { biome = bm === "snow" ? "snow" : "beach"; terrain = "plains"; rawH = 0; }
       else {
-        biome = bm;
-        const hi = snoise(col * 0.42 + 9, row * 0.42 + 3) > 0.55;
-        if (bm === "forest") { elev = hi ? 2 : 1; terrain = "forest"; }
-        else if (bm === "desert") { elev = hi ? 2 : 1; terrain = hi ? "mountain" : "desert"; }
-        else { elev = hi ? 2 : 1; terrain = hi ? "mountain" : "plains"; } // grass/snow
+        biome = bm; terrain = bm === "forest" ? "forest" : bm === "desert" ? "desert" : "plains";
+        const central = Math.max(0, 1 - d / (shadowR * 1.8)) * 2.5; // ค่อยๆ สูงเข้าหากลาง
+        const hills = snoise(col * 0.34 + 9, row * 0.34 + 3) * 2.6; // เนินสุ่ม
+        rawH = 1 + central + hills;
       }
     }
-    info[`${col},${row}`] = { biome, elev, terrain };
+    info[`${col},${row}`] = { biome, terrain, rawH, elev: 0 };
   }
+
+  // ── 2) Smoothing: บังคับความต่างความสูงกับเพื่อนบ้าน ≤ 1 ชั้น ──
+  //   กำจัด "บล็อกโดดสูง" + ได้ลาดขั้นบันไดธรรมชาติ + บัลลังก์กลายเป็นพีระมิดขั้นบันไดสวยงาม
+  const keyList = Object.keys(info);
+  for (let pass = 0; pass < 8; pass++) {
+    for (const k of keyList) {
+      const c = info[k]; if (c.biome === "water") continue;
+      const [cc, rr] = k.split(",").map(Number);
+      let minN = Infinity;
+      for (const [dc, dr] of DIRS8) { const n = info[`${cc + dc},${rr + dr}`]; if (n && n.biome !== "water" && n.rawH < minN) minN = n.rawH; }
+      if (minN !== Infinity && c.rawH > minN + 1) c.rawH = minN + 1;
+    }
+  }
+  for (const k of keyList) { const c = info[k]; c.elev = c.biome === "water" ? 0 : Math.max(0, Math.round(c.rawH)); }
   void highR;
 
   // ลาวาในไบโอมทะเลทราย (SE) ใกล้แกนกลาง — เลี่ยงแกนบัลลังก์/วงเงา
@@ -587,7 +603,7 @@ function createInitialGameState(room) {
     const c0 = Math.round(cx + (throneR + 0.6) + (shadowR - throneR) * t);
     const r0 = Math.round(cy + (throneR + 0.6) + (shadowR - throneR) * t);
     const cell = info[`${c0},${r0}`];
-    if (cell && !["throne", "shadow", "water"].includes(cell.biome)) { cell.biome = "lava"; cell.terrain = "mountain"; cell.elev = Math.max(cell.elev, 2); }
+    if (cell && !["throne", "shadow", "water"].includes(cell.biome)) { cell.biome = "lava"; cell.terrain = "mountain"; } // คงความสูง smooth
   }
 
   // ─── จุดเกิดผู้เล่น: เลือกช่อง "บก" ที่ใกล้มุม/ขอบที่สุด (เกาะออร์แกนิก มุมอาจเป็นทะเล) ──
@@ -614,15 +630,24 @@ function createInitialGameState(room) {
   for (const k of spawnKeys) {
     const c = info[k]; if (!c) continue;
     if (["throne", "shadow", "lava", "water"].includes(c.biome)) c.biome = "beach";
-    c.terrain = "plains"; c.elev = 1;
+    c.terrain = "plains"; // คงความสูง smooth ของช่อง
   }
 
   // ─── วางโซนพิเศษบนเกาะตามไบโอม (บัลลังก์อยู่กลางเสมอ) ──
   const usedZone = {};
   const zoneToCell = {};
-  const ctrKey = `${Math.round(cx)},${Math.round(cy)}`;
+  const tcc = Math.round(cx), trr = Math.round(cy);
+  const ctrKey = `${tcc},${trr}`;
   usedZone[ctrKey] = "throne"; zoneToCell["throne"] = ctrKey;
-  if (info[ctrKey]) { info[ctrKey].biome = "throne"; info[ctrKey].terrain = "mountain"; info[ctrKey].elev = Math.max(info[ctrKey].elev, 5); }
+  // footprint บัลลังก์ 3×3: ปรับให้ "ราบเท่ากัน" โดยลงมาที่ระดับต่ำสุดของ footprint
+  //   (ลงเท่านั้น → ไม่สร้างหน้าผา >1 ชั้นกับเพื่อนบ้าน) + จองช่องกันพร็อพ/ปราสาทคร่อม
+  if (info[ctrKey]) {
+    const foot = [];
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { const c = info[`${tcc + dc},${trr + dr}`]; if (c && c.biome !== "water") foot.push(c); }
+    const te = foot.reduce((m, c) => Math.min(m, c.elev), Infinity);
+    for (const c of foot) { c.elev = te; c.reserved = true; if (c !== info[ctrKey]) { c.biome = "shadow"; c.terrain = "mountain"; } }
+    info[ctrKey].biome = "throne"; info[ctrKey].terrain = "mountain";
+  }
 
   const ZONE_PRED = {
     palace: c => c.biome === "shadow",
@@ -681,7 +706,7 @@ function createInitialGameState(room) {
     if (specialZone && FLAT_ZONES.has(specialZone) && terrain === "water") terrain = "plains";
     let shopItems = null;
     if (specialZone && SHOP_ZONES.includes(specialZone)) shopItems = generateShopItemsServer(specialZone);
-    cells.push({ col, row, key, terrain, specialZone, trap: null, shopItems, biome: c.biome, elev: c.elev });
+    cells.push({ col, row, key, terrain, specialZone, trap: null, shopItems, biome: c.biome, elev: c.elev, reserved: !!c.reserved });
   }
 
   const players = room.players.map((p, i) => {

@@ -23,7 +23,9 @@ const ZONE_MODEL = {
   volcano: "MountainLarge_Single", watchtower: "WatchTower_FirstAge_Level1",
   graveyard: "Rock_Group",
 };
-const ZONE_SCALE = { throne: 1.5, palace: 1.25, volcano: 1.3, oasis: 0.9, treasure: 0.8 };
+// footprint อาคารเป็น "จำนวนช่อง" → สเกลโมเดลให้กว้างเท่ากับ footprint จริง (occupancy ตรง)
+const ZONE_TILES = { throne: 2.6, palace: 1.7, volcano: 1.6, market: 1.4, rebel_camp: 1.4, village: 1.3, cave: 1.3, dungeon: 1.3, oasis: 1.2, treasure: 1.0 };
+const ZONE_TILE_DEF = 1.15;
 // โมเดลตกแต่งภูมิประเทศ — ใช้ "ตัวเดี่ยว" (ไม่ใช่ group) เพื่อให้ขนาดพอดี 1 ช่อง ไม่ล้น/ลอย
 const PROP = { tree: "Resource_Tree1", pine: "Resource_PineTree", rock: "Resource_Rock_2", rockG: "Rock", gold: "Resource_Gold_2", mtn: "Mountain_Single" };
 
@@ -117,7 +119,12 @@ export default function IslandMap3D(props) {
       ptr.x = ((e.clientX - r.left) / r.width) * 2 - 1;
       ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
     };
-    const pick = () => { raycaster.setFromCamera(ptr, cam); return raycaster.intersectObjects(R.current.tiles, false)[0]?.object?.userData?.cell || null; };
+    const pick = () => {
+      const r = R.current; if (!r.terrain) return null;
+      raycaster.setFromCamera(ptr, cam);
+      const hit = raycaster.intersectObject(r.terrain, false)[0];
+      return hit && hit.instanceId != null ? (r.cellByInstance[hit.instanceId] || null) : null;
+    };
     const onDown = (e) => { downX = e.clientX; downY = e.clientY; downT = Date.now(); };
     const onUp = (e) => {
       if (e.button !== 0) return;
@@ -179,42 +186,45 @@ export default function IslandMap3D(props) {
   function rebuildBoard() {
     const r = R.current; if (!r.ready) return;
     const cells = pr.current.cells || []; if (!cells.length) return;
-    clear(r.boardGroup); clear(r.propGroup); r.tiles = []; r.cellWorld.clear();
-    r.throneGlow.intensity = 0;
+    clear(r.boardGroup); clear(r.propGroup); r.cellWorld.clear();
+    r.cellByInstance = []; r.terrain = null; r.throneGlow.intensity = 0;
 
     let maxC = 0, maxR2 = 0; for (const c of cells) { if (c.col > maxC) maxC = c.col; if (c.row > maxR2) maxR2 = c.row; }
     const ox = maxC / 2, oz = maxR2 / 2;
     r.boardRadius = Math.max(maxC, maxR2) * 0.5 + 1;
 
-    const box = new THREE.BoxGeometry(0.98, 1, 0.98);
-    for (const c of cells) {
+    // ── พื้น: InstancedMesh ก้อนเดียว (รับกริดใหญ่ได้ลื่น) ──
+    const geo = new THREE.BoxGeometry(0.98, 1, 0.98);
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+    const inst = new THREE.InstancedMesh(geo, mat, cells.length);
+    inst.castShadow = true; inst.receiveShadow = true; inst.frustumCulled = false;
+    const m4 = new THREE.Matrix4(), colr = new THREE.Color();
+    cells.forEach((c, i) => {
       const biome = c.biome || "grass";
       const isWater = biome === "water";
       const hgt = isWater ? 0.22 : ((c.elev ?? 1) + 1) * HSTEP;
       const wx = c.col - ox, wz = c.row - oz;
-      const col = BIOME[biome] !== undefined ? BIOME[biome] : 0x6aa844;
-      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: isWater ? 0.25 : 0.95, flatShading: true });
-      if (isWater) { mat.transparent = true; mat.opacity = 0.85; mat.metalness = 0.1; }
-      if (biome === "lava") { mat.emissive = new THREE.Color(0xe0531f); mat.emissiveIntensity = 0.5; }
-      const m = new THREE.Mesh(box, mat);
-      m.scale.y = hgt; m.position.set(wx, hgt / 2, wz);
-      m.castShadow = !isWater; m.receiveShadow = true; m.frustumCulled = false;
-      m.userData.cell = c;
-      r.boardGroup.add(m); r.tiles.push(m);
+      m4.makeScale(0.98, hgt, 0.98); m4.setPosition(wx, hgt / 2, wz);
+      inst.setMatrixAt(i, m4);
+      colr.setHex(BIOME[biome] !== undefined ? BIOME[biome] : 0x6aa844);
+      inst.setColorAt(i, colr);
+      r.cellByInstance[i] = c;
       r.cellWorld.set(c.key, { x: wx, z: wz, top: hgt });
-      if (isWater) continue; // ทะเล: ไม่มีของตกแต่ง/อาคาร
+    });
+    inst.instanceMatrix.needsUpdate = true; if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    r.terrain = inst; r.boardGroup.add(inst);
 
-      // biome decorations (ตัวเดี่ยว วางบนผิวช่อง — ป่าวาง 2 ต้นให้ทึบ)
-      const pk = propKind(biome, c);
-      if (pk) { const n = pk === "tree" ? 2 : 1; for (let i = 0; i < n; i++) placeProp(r, pk, wx, hgt, wz, c, i); }
-
-      // special-zone: อาคาร glTF (วางบนผิวช่อง) + ธงปักพื้นถ้าไม่มีโมเดล (ไม่มีไอคอนลอย)
+    // ── ของบนพื้น: อาคารโซน (สเกลตาม footprint) + ของตกแต่งไบโอม (วางบนผิว ไม่ลอย) ──
+    for (const c of cells) {
+      const biome = c.biome || "grass"; if (biome === "water") continue;
+      const cw = r.cellWorld.get(c.key); const wx = cw.x, wz = cw.z, hgt = cw.top;
       if (c.specialZone) {
         const mn = ZONE_MODEL[c.specialZone], tpl = mn && r.templates[mn];
         if (tpl) {
           const o = tpl.clone(true);
-          o.scale.setScalar(r.GS * (ZONE_SCALE[c.specialZone] || 1));
-          o.position.set(wx, hgt, wz);
+          const tiles = ZONE_TILES[c.specialZone] || ZONE_TILE_DEF;
+          o.scale.setScalar(tiles / Math.max(0.4, tpl.userData.fp)); // กว้างเท่า footprint จริง
+          o.position.set(wx, hgt, wz); // ฐานอยู่บนผิวช่องพอดี
           o.rotation.y = Math.floor(rhash(c.col + 7, c.row + 3) * 4) * Math.PI / 2;
           if (c.specialZone === "throne") {
             o.traverse(n => { if (n.isMesh) { n.material = n.material.clone(); n.material.color.multiplyScalar(0.5); n.material.color.lerp(new THREE.Color(0x6a3aa0), 0.45); n.material.emissive = new THREE.Color(0x6a3aa0); n.material.emissiveIntensity = 0.4; } });
@@ -225,7 +235,11 @@ export default function IslandMap3D(props) {
           const zd = (pr.current.zones || {})[c.specialZone];
           r.propGroup.add(groundFlag(wx, hgt, wz, zd?.color || "#c9a84c"));
         }
+        continue; // ช่องอาคาร: ไม่วางพร็อพทับ
       }
+      if (c.reserved) continue; // footprint บัลลังก์: เว้นไว้
+      const pk = propKind(biome, c);
+      if (pk) { const n = pk === "tree" ? 2 : 1; for (let i = 0; i < n; i++) placeProp(r, pk, wx, hgt, wz, c, i); }
     }
     frameCamera(r);
   }
