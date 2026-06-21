@@ -92,9 +92,52 @@ export default function IslandMap3D(props) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.22));
     const throneGlow = new THREE.PointLight(0xc15ee8, 0, 18, 1.6); scene.add(throneGlow);
 
-    const ocean = new THREE.Mesh(
-      new THREE.PlaneGeometry(400, 400),
-      new THREE.MeshStandardMaterial({ color: 0x195270, roughness: 0.22, metalness: 0.12, transparent: true, opacity: 0.92 }));
+    const waterUniforms = { uTime: { value: 0 } };
+    const oceanMat = new THREE.MeshStandardMaterial({ color: 0x195270, roughness: 0.18, metalness: 0.18, transparent: true, opacity: 0.94 });
+    oceanMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = waterUniforms.uTime;
+      const wave = `
+        uniform float uTime;
+        float wv(vec2 p, float t){
+          float h = 0.0;
+          h += sin(p.x * 0.17 + t * 1.05) * 0.16;
+          h += sin(p.y * 0.21 - t * 0.85) * 0.13;
+          h += sin((p.x + p.y) * 0.13 + t * 1.35) * 0.10;
+          h += sin((p.x - p.y) * 0.26 - t * 1.60) * 0.06;
+          return h;
+        }
+        varying float vWaveH;
+      `;
+      shader.vertexShader = wave + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <beginnormal_vertex>",
+        `float e = 1.0;
+         float n0 = wv(position.xy, uTime);
+         float nx = wv(position.xy + vec2(e, 0.0), uTime);
+         float ny = wv(position.xy + vec2(0.0, e), uTime);
+         vec3 objectNormal = normalize(vec3(-(nx - n0), -(ny - n0), 1.0));`
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+         vWaveH = wv(position.xy, uTime);
+         transformed.z += vWaveH;`
+      );
+      shader.fragmentShader = "varying float vWaveH;\n" + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+         float crest = smoothstep(0.12, 0.30, vWaveH);
+         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.60, 0.78, 0.86), crest * 0.5);`
+      );
+      // roughnessFactor มีค่าหลัง <roughnessmap_fragment> เท่านั้น → ฉีดตรงนี้ (กัน shader compile error)
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <roughnessmap_fragment>",
+        `#include <roughnessmap_fragment>
+         roughnessFactor = mix(roughnessFactor, 0.55, smoothstep(0.12, 0.30, vWaveH));`
+      );
+    };
+    const ocean = new THREE.Mesh(new THREE.PlaneGeometry(400, 400, 200, 200), oceanMat);
     ocean.rotation.x = -Math.PI / 2; ocean.position.y = 0.32; ocean.receiveShadow = true; scene.add(ocean);
 
     const boardGroup = new THREE.Group(); scene.add(boardGroup);
@@ -164,6 +207,7 @@ export default function IslandMap3D(props) {
     const loop = () => {
       raf = requestAnimationFrame(loop);
       const t = clock.getElapsedTime();
+      waterUniforms.uTime.value = t;
       if (R.current.throneGlow.intensity > 0) R.current.throneGlow.intensity = 24 + Math.sin(t * 2.3) * 5;
       for (const a of R.current.animers) {
         if (a.type === "turn") { a.obj.position.y = a.baseY + Math.abs(Math.sin(t * 3)) * 0.35; a.obj.rotation.y = t * 1.2; }
@@ -232,7 +276,7 @@ export default function IslandMap3D(props) {
     const ox = maxC / 2, oz = maxR2 / 2;
     r.boardRadius = Math.max(maxC, maxR2) * 0.5 + 1;
     // landmark/structure scaling ตามขนาดแมพ — แมพใหญ่ → landmark อลังการขึ้น, แมพเล็ก → กระชับ
-    const landScale = THREE.MathUtils.clamp(r.boardRadius / 6.5, 0.92, 1.6);
+    const landScale = THREE.MathUtils.clamp(r.boardRadius / 8, 0.85, 1.12);
 
     // ── พื้น: InstancedMesh ก้อนเดียว (รับกริดใหญ่ได้ลื่น) ──
     const geo = new THREE.BoxGeometry(0.98, 1, 0.98);
@@ -268,7 +312,10 @@ export default function IslandMap3D(props) {
           const multi = MULTI_TILE_ZONE.has(c.specialZone);
           let tiles = Math.min(ZONE_TILES[c.specialZone] || ZONE_TILE_DEF, multi ? 99 : TILE_HALF * 2);
           if (multi) tiles *= landScale; // landmark สเกลตามขนาดแมพ (เฉพาะอาคารหลายช่องที่จองพื้นที่ไว้)
-          o.scale.setScalar(tiles / Math.max(0.4, tpl.userData.fp)); // กว้างเท่า footprint จริง
+          let zs = tiles / Math.max(0.4, tpl.userData.fp); // กว้างเท่า footprint จริง
+          const zMaxH = c.specialZone === "throne" ? 3.4 : 2.0; // กันโมเดลสูงเกิน (ภูเขาไฟ ฯลฯ); บัลลังก์สูงได้
+          if ((tpl.userData.h || 1) * zs > zMaxH) zs = zMaxH / (tpl.userData.h || 1);
+          o.scale.setScalar(zs);
           o.position.set(wx, hgt - 0.05, wz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
           o.rotation.y = Math.floor(rhash(c.col + 7, c.row + 3) * 4) * Math.PI / 2;
           if (c.specialZone === "throne") {
@@ -327,10 +374,9 @@ export default function IslandMap3D(props) {
     const mn = PROP[key]; const tpl = mn && r.templates[mn];
     if (!tpl) return;
     const o = tpl.clone(true);
-    // คำนวณก่อนวาง: ถ้าฐานโมเดล (footprint) กว้างเกินช่อง → บีบสเกลลงให้พอดีช่องเสมอ (กันล้นขอบ)
-    let s = r.GS * (PROP_SCALE[key] || 0.55);
-    const fp = tpl.userData.fp || 1;
-    if (fp * s > TILE_HALF * 2) s = (TILE_HALF * 2) / fp;
+    // คำนวณก่อนวาง: บีบสเกลให้ "ฐานพอดีช่อง (ไม่ล้นขอบ)" และ "ไม่สูงโผล่เกิน" (กันภูเขา/หินยักษ์)
+    const fp = tpl.userData.fp || 1, mh = tpl.userData.h || 1;
+    const s = Math.min(r.GS * (PROP_SCALE[key] || 0.55), (TILE_HALF * 2) / fp, 1.25 / mh);
     o.scale.setScalar(s);
     // jitter ถูกจำกัดด้วย "ที่ว่างที่เหลือ" หลังหักครึ่ง footprint → ขอบโมเดลไม่มีทางเลยขอบช่อง
     const room = Math.max(0, TILE_HALF - (fp * s) / 2);
@@ -438,7 +484,8 @@ function prep(gltf) {
   s.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (o.material) o.material.roughness = 0.85; } });
   const b = new THREE.Box3().setFromObject(s); const ctr = new THREE.Vector3(); b.getCenter(ctr);
   s.position.x -= ctr.x; s.position.z -= ctr.z; s.position.y -= b.min.y;
-  const g = new THREE.Group(); g.add(s); const sz = new THREE.Vector3(); b.getSize(sz); g.userData.fp = Math.max(sz.x, sz.z) || 1;
+  const g = new THREE.Group(); g.add(s); const sz = new THREE.Vector3(); b.getSize(sz);
+  g.userData.fp = Math.max(sz.x, sz.z) || 1; g.userData.h = sz.y || 1; // กว้างฐาน + สูง (ใช้ clamp กันโมเดลใหญ่/สูงเกิน)
   return g;
 }
 function iconSprite(ico, ringColor, scale = 1) {
@@ -472,104 +519,8 @@ function labelSprite(ico, name, color = "#c9a84c") {
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
   spr.renderOrder = 999; spr.scale.set(2.6, 0.65, 1); return spr;
 }
-// ── ป้อมปราการบัลลังก์ — กำแพงขาวต่อเนื่องไร้รอยต่อ (procedural) + 4 ประตู + หอคอยมุม ──
-// สร้างเป็น "โครงสร้างเดียว": กล่องเต็มช่องชนกัน (ไม่มีช่องว่าง/ซ้อน), ฐานติดดิน + ยอดเรียบเสมอ (ไม่ลอย),
-// validate footprint ทุกช่องในวง (อยู่ในแมพ + บนพื้นดิน) ก่อนวาง → ไม่มีชิ้นนอกแมพ/ลอยน้ำ
+// ตกแต่งบัลลังก์ — ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (กำแพงถูกถอดออกตามคำขอผู้ใช้)
 function buildThroneDecor(r, col0, row0, cx, cy, cz) {
-  const get = (c, w) => r.cellWorld.get(`${c},${w}`);
-  const valid = (cw) => !!cw && !cw.water;                 // 24/25/26: ช่องต้องมีจริง + บนพื้นดิน
-  const ringScore = (R) => {                               // วง R สมบูรณ์แค่ไหน (สัดส่วนช่องที่ valid)
-    let ok = 0, tot = 0;
-    for (let dc = -R; dc <= R; dc++) for (let dr = -R; dr <= R; dr++) {
-      if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;
-      tot++; if (valid(get(col0 + dc, row0 + dr))) ok++;
-    }
-    return tot ? ok / tot : 0;
-  };
-
-  // 1) รัศมีที่สูงบัลลังก์ (plateau) — ไล่ออกจนพ้นไบโอมเงา/ที่สูง เพื่อวางกำแพงนอกที่สูง
-  let plateauR = 1;
-  for (let R = 1; R <= 8; R++) {
-    let high = 0, tot = 0;
-    for (let dc = -R; dc <= R; dc++) for (let dr = -R; dr <= R; dr++) {
-      if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;
-      const cw = get(col0 + dc, row0 + dr); if (!cw) continue; tot++;
-      const cl = cw.cell;
-      if (cl?.reserved || cl?.biome === "throne" || cl?.biome === "shadow" || cl?.specialZone === "throne") high++;
-    }
-    if (tot && high / tot >= 0.4) plateauR = R; else break;
-  }
-
-  // 2) เลือกรัศมีกำแพง: นอก plateau + เว้น ~2 ช่อง แล้ว validate ทั้งวง (เลือกวงที่สมบูรณ์สุด)
-  const desired = plateauR + 3;
-  let R = desired, best = -1;
-  for (let cand = Math.max(2, desired - 1); cand <= desired + 3; cand++) {
-    const s = ringScore(cand);
-    if (s > best + 1e-3) { best = s; R = cand; }
-    if (s >= 0.999) { R = cand; break; }                  // วงสมบูรณ์ → ใช้เลย
-  }
-
-  // 3) เก็บช่องในวงที่ valid + หาความสูงพื้นสูงสุด → ยอดกำแพงเรียบเสมอกัน (seamless)
-  const ring = [];
-  let maxTop = cy;
-  for (let dc = -R; dc <= R; dc++) for (let dr = -R; dr <= R; dr++) {
-    if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;
-    const cw = get(col0 + dc, row0 + dr);
-    if (!valid(cw)) continue;                              // ข้ามช่องนอกแมพ/น้ำ (anti-floating)
-    ring.push({ dc, dr, cw });
-    if (cw.top > maxTop) maxTop = cw.top;
-  }
-  const WALL_H = 0.6, TOWER_EXTRA = 0.5, WALL_T = 0.26, TOWER_W = 0.5, TOP = maxTop + WALL_H;
-
-  const stone = new THREE.MeshStandardMaterial({ color: 0xeceef2, roughness: 0.82, metalness: 0, flatShading: true });
-  const ember = new THREE.MeshStandardMaterial({ color: 0xffb84a, emissive: 0xff7a1a, emissiveIntensity: 1.4 });
-  const box = (w, h, d, mat) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.castShadow = true; m.receiveShadow = true; return m; };
-  // กล่องจากฐานพื้นช่อง(baseTop) ขึ้นไปถึง topY → ฐานติดดิน ยอดเสมอ (ไม่ลอย + seamless)
-  const grounded = (x, z, topY, baseTop, w, d) => { const h = Math.max(0.2, topY - baseTop); const m = box(w, h, d, stone); m.position.set(x, baseTop + h / 2, z); return m; };
-  // ใบเสมา (merlon) สลับฟันปลาบนยอดกำแพง
-  const merlons = (x, z, topY, along) => {
-    for (let k = 0; k < 3; k += 2) {
-      const off = -0.5 + 0.5 / 3 + (k / 3);
-      const mm = box(along === "x" ? 0.26 : WALL_T * 1.05, 0.18, along === "x" ? WALL_T * 1.05 : 0.26, stone);
-      mm.position.set(x + (along === "x" ? off : 0), topY + 0.09, z + (along === "x" ? 0 : off));
-      r.propGroup.add(mm);
-    }
-  };
-  const torch = (x, z, y) => {
-    const fl = box(0.13, 0.13, 0.13, ember); fl.position.set(x, y, z); r.propGroup.add(fl);
-    const light = new THREE.PointLight(0xff8a3a, 5, 5.5, 2); light.position.set(x, y + 0.15, z); r.propGroup.add(light);
-    r.animers.push({ type: "torch", obj: light, base: 5, ph: x + z });
-  };
-
-  const isCorner = (dc, dr) => Math.abs(dc) === R && Math.abs(dr) === R;
-  const isGate = (dc, dr) => (dc === 0 && Math.abs(dr) === R) || (dr === 0 && Math.abs(dc) === R); // 23: ประตู 4 ทิศ กลางด้าน
-
-  // 4) สร้างทีละช่อง — มุม=หอคอย, กลางด้าน=ประตู(เว้นช่องเดิน), อื่น=กำแพงตรง
-  for (const { dc, dr, cw } of ring) {
-    const along = Math.abs(dr) === R ? "x" : "z";          // บน/ล่าง=แนว x, ซ้าย/ขวา=แนว z
-    if (isCorner(dc, dr)) {
-      r.propGroup.add(grounded(cw.x, cw.z, TOP + TOWER_EXTRA, cw.top, TOWER_W, TOWER_W));
-      for (const ox2 of [-TOWER_W / 2 + 0.07, TOWER_W / 2 - 0.07]) for (const oz2 of [-TOWER_W / 2 + 0.07, TOWER_W / 2 - 0.07]) {
-        const mm = box(0.14, 0.2, 0.14, stone); mm.position.set(cw.x + ox2, TOP + TOWER_EXTRA + 0.1, cw.z + oz2); r.propGroup.add(mm);
-      }
-    } else if (isGate(dc, dr)) {
-      const pierW = 0.28, gap = 0.46;                      // ช่องประตูกว้างพอให้ตัวละครเดินผ่าน
-      for (const s of [-1, 1]) {
-        const px = cw.x + (along === "x" ? s * (gap / 2 + pierW / 2) : 0);
-        const pz = cw.z + (along === "x" ? 0 : s * (gap / 2 + pierW / 2));
-        r.propGroup.add(grounded(px, pz, TOP + 0.14, cw.top, along === "x" ? pierW : WALL_T + 0.06, along === "x" ? WALL_T + 0.06 : pierW));
-        torch(cw.x + (along === "x" ? s * 0.5 : 0), cw.z + (along === "x" ? 0 : s * 0.5), TOP + 0.18);
-      }
-      // คานทับหลังเชื่อมเสาสองข้าง (ไม่มีช่องว่างด้านบนประตู → seamless)
-      const lintel = box(along === "x" ? gap + pierW * 2 : WALL_T + 0.06, 0.24, along === "x" ? WALL_T + 0.06 : gap + pierW * 2, stone);
-      lintel.position.set(cw.x, TOP - 0.12, cw.z); r.propGroup.add(lintel);
-      merlons(cw.x, cw.z, TOP, along);
-    } else {
-      r.propGroup.add(grounded(cw.x, cw.z, TOP, cw.top, along === "x" ? 1.02 : WALL_T, along === "x" ? WALL_T : 1.02));
-      merlons(cw.x, cw.z, TOP, along);
-    }
-  }
-
   // ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (ใกล้ศูนย์กลาง)
   for (const sx of [-0.7, 0.7]) {
     const banner = groundFlag(cx + sx, cy, cz - 0.8, "#7a3ad0");
