@@ -10,8 +10,7 @@ import { TERRAIN, TERRAIN_COLORS, TERRAIN_STROKE } from "../constants/terrain.js
 import { hexToPixel, hexPoints, hexDistance, getReachable, getCostMap } from "../utils/hexMath.js";
 
 import TopBar from "./TopBar.jsx";
-import LeftPanel from "./LeftPanel.jsx";
-import RightPanel from "./RightPanel.jsx";
+// LeftPanel/RightPanel แทนด้วย HUD overlay บนแมพ (crest/shields/stat bar/log)
 import IslandMap3D from "./IslandMap3D.jsx";
 import HandCard from "./HandCard.jsx";
 import CharIcon from "./CharIcon.jsx";
@@ -144,6 +143,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [showQuest, setShowQuest] = useState(false);   // อ่านเควสรองของตัวเองซ้ำ (ลับเฉพาะตัว)
   const [turnAnnounce, setTurnAnnounce] = useState(null);
   const [showCards, setShowCards] = useState(false);  // card drawer open/close
+  const [logOpen, setLogOpen] = useState(false);      // HUD event log expand/collapse
   const [drawReveal, setDrawReveal] = useState(null); // { cards, flipped[] } — เปิดไพ่ที่จั่วได้
   const [drawSeen, setDrawSeen] = useState(false);     // เปิดไพ่ของเทิร์นนี้ดูแล้วหรือยัง
   const lastDrawKeyRef = useRef("");
@@ -550,10 +550,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           onLeave={onLeave}
         />
 
-        {/* LEFT PANEL — Players */}
-        <LeftPanel players={players} currentTurn={currentTurn} myIdx={myIdx} me={me} setTooltip={setTooltip} />
-
-        {/* RIGHT PANEL — moved inside map-area as overlay */}
+        {/* LEFT PANEL ถูกแทนด้วย HUD overlay บนแมพ (crest/shields/stat bar) */}
 
         {/* ── SKILL MODE BANNER — แสดงเมื่ออยู่ใน skill targeting mode ── */}
         {(actionMode === "skill" || actionMode === "king_skill") && isMyTurn && (
@@ -713,8 +710,72 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             }}>{turnAnnounce}</div>
           )}
 
-          {/* ── RIGHT PANEL OVERLAY — log บนแมพโปร่งใส ── */}
-          <RightPanel log={log} />
+          {/* ═══ BATTLE HUD — crest / shields / event log / stat bar ═══ */}
+          {/* crest: ผู้เล่นที่กำลังเดิน (มุมซ้ายบน) */}
+          {currentPlayer && (
+            <div className="hud-crest">
+              <div className="hud-portrait">
+                {currentPlayer.alive ? <CharIcon ch={CHARACTERS[currentPlayer.charId]} size={64} /> : "💀"}
+                <div className="hud-ap" title="งบเดินที่เหลือ">{actionsDone.moveLeft ?? 0}</div>
+              </div>
+              <div className="hud-crest-meta">
+                <div className="hud-name">{currentPlayer.name}{currentTurn === myIdx ? " (คุณ)" : ""}</div>
+                <div className="hud-turn-lbl">▶ กำลังเดิน</div>
+                <div className="hud-hearts">{Array.from({ length: currentPlayer.maxHp }).map((_, i) => <span key={i}>{i < currentPlayer.hp ? "❤️" : "🖤"}</span>)}</div>
+                {ROLES[me?.role]?.win && <div className="hud-obj">🎯 {ROLES[me.role].win}</div>}
+              </div>
+            </div>
+          )}
+
+          {/* shields: ผู้เล่นทุกคน (คลิกเพื่อดูสถานะ) */}
+          <div className="hud-shields">
+            {players.map((p, i) => (
+              <div key={i} className={`hud-shield ${currentTurn === i ? "active" : ""} ${!p.alive ? "dead" : ""}`}
+                onClick={() => { setStatusSel(i); setShowStatus(true); }} title={`ดูสถานะ ${p.name}`}>
+                <span className="hs-ico">{p.alive ? <CharIcon ch={CHARACTERS[p.charId]} size={30} /> : "💀"}</span>
+                <span className="hs-no">{i + 1}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* event log (ล่างกลาง, ย่อ/ขยายได้) */}
+          <div className={`hud-log ${logOpen ? "" : "collapsed"}`}>
+            <div className="hud-log-hd" onClick={() => setLogOpen(v => !v)}>
+              <span className="lh-t">📜 บันทึกเหตุการณ์</span>
+              <span className="lh-x">{logOpen ? "▼ ย่อ" : "▲ ขยาย"}</span>
+            </div>
+            <div className="hud-log-body">
+              {(logOpen ? log.slice(-40) : log.slice(-1)).map((e, i) => (
+                <div key={i} className={`hud-log-row ${e.type}`}>{e.msg}</div>
+              ))}
+            </div>
+          </div>
+
+          {/* stat bar: ผู้เล่นเรา (ล่างกลาง) */}
+          {me && (
+            <div className="hud-statbar">
+              <div className="hud-sb-portrait" onClick={() => { setStatusSel(myIdx >= 0 ? myIdx : 0); setShowStatus(true); }} title="ดูสถานะเต็ม">
+                <div className="hud-sb-mini">{me.alive ? <CharIcon ch={CHARACTERS[me.charId]} size={38} /> : "💀"}</div>
+                <div className="hud-sb-id">{me.name}<small>{ROLES[me.role] ? `${ROLES[me.role].ico} ${ROLES[me.role].name}` : "❓ ลับ"}</small></div>
+              </div>
+              <div className="hud-sb-stats">
+                <div className="hud-coin hp"><span className="c-ico">❤️</span><span className="c-val">{me.hp}/{me.maxHp}</span><span className="c-lab">HP</span></div>
+                <div className="hud-coin mp"><span className="c-ico">💧</span><span className="c-val">{me.mana}/{me.maxMana}</span><span className="c-lab">มานา</span></div>
+                <div className="hud-sb-sep" />
+                <div className="hud-coin"><span className="c-ico">⚔️</span><span className="c-val">{me.atk}</span><span className="c-lab">โจมตี</span></div>
+                <div className="hud-coin"><span className="c-ico">🛡️</span><span className="c-val">{me.def}</span><span className="c-lab">ป้องกัน</span></div>
+                <div className="hud-coin"><span className="c-ico">👟</span><span className="c-val">{me.move}</span><span className="c-lab">ความเร็ว</span></div>
+                <div className="hud-coin"><span className="c-ico">🎯</span><span className="c-val">{me.range ?? 0}</span><span className="c-lab">ระยะ</span></div>
+                <div className="hud-sb-sep" />
+                <div className="hud-coin gold"><span className="c-ico">💰</span><span className="c-val">{me.gold}</span><span className="c-lab">ทอง</span></div>
+              </div>
+              {me.statusEffects?.length > 0 && (
+                <div className="hud-sb-fx">
+                  {me.statusEffects.map((s, i) => <span key={i} className={`status-tag status-${s.type}`}>{s.type} {s.duration}t</span>)}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── CARD RAIL — มือผู้เล่นติดขอบขวา (เห็นตลอด) · ชี้เมาส์ = การ์ดเด้งออกแนวนอน ── */}
           <div className={`hand-rail${showCards ? " collapsed" : ""}`}>
