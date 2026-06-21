@@ -354,38 +354,55 @@ export default function IslandMap3D(props) {
     }
 
     // ── ของบนพื้น: อาคารโซน (สเกลตาม footprint) + ของตกแต่งไบโอม (วางบนผิว ไม่ลอย) ──
+    const cellAt = new Map(); for (const c of cells) cellAt.set(c.col + "," + c.row, c);
+    // footprint จริงของ landmark = ช่องตัวเอง + ช่อง reserved ที่ต่อกัน (BFS) → ใช้จัดโมเดลให้อยู่กึ่งกลางและกว้างไม่เกินพื้นที่จองจริง
+    const footprintOf = (c0) => {
+      const seen = new Set([c0.col + "," + c0.row]); const members = [c0]; const stack = [c0];
+      while (stack.length) {
+        const cur = stack.pop();
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const k = (cur.col + dx) + "," + (cur.row + dz);
+          if (seen.has(k)) continue;
+          const nb = cellAt.get(k);
+          if (nb && nb.reserved) { seen.add(k); members.push(nb); stack.push(nb); }
+        }
+      }
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const m of members) { const mx = m.col - ox, mz = m.row - oz; if (mx < minX) minX = mx; if (mx > maxX) maxX = mx; if (mz < minZ) minZ = mz; if (mz > maxZ) maxZ = mz; }
+      return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: (maxX - minX) + 0.98, d: (maxZ - minZ) + 0.98 };
+    };
     for (const c of cells) {
       const biome = c.biome || "grass"; if (biome === "water") continue;
       const cw = r.cellWorld.get(c.key); const wx = cw.x, wz = cw.z, hgt = cw.top;
       if (c.specialZone) {
+        const fpr = footprintOf(c);
         const zd = (pr.current.zones || {})[c.specialZone];
         const mn = ZONE_MODEL[c.specialZone], tpl = mn && r.templates[mn];
         if (tpl) {
           const o = tpl.clone(true);
-          // อาคารหลายช่องจองช่องข้างไว้แล้ว → กว้างได้ตาม footprint; อาคารช่องเดียวบีบให้พอดีช่อง (ไม่ล้นขอบ)
-          const multi = MULTI_TILE_ZONE.has(c.specialZone);
-          let tiles = Math.min(ZONE_TILES[c.specialZone] || ZONE_TILE_DEF, multi ? 99 : TILE_HALF * 2);
-          if (multi) tiles *= landScale; // landmark สเกลตามขนาดแมพ (เฉพาะอาคารหลายช่องที่จองพื้นที่ไว้)
+          // กว้างไม่เกิน footprint จริง (ด้านแคบสุด − ขอบกันชน) แล้ววางกึ่งกลาง footprint → ไม่มีทางยื่นพ้นขอบ/หน้าผา
+          const fitW = Math.min(fpr.w, fpr.d) - 0.08;
+          const tiles = Math.min(ZONE_TILES[c.specialZone] || ZONE_TILE_DEF, fitW);
           let zs = tiles / Math.max(0.4, tpl.userData.fp); // กว้างเท่า footprint จริง
           const zMaxH = c.specialZone === "throne" ? 3.4 : 2.0; // กันโมเดลสูงเกิน (ภูเขาไฟ ฯลฯ); บัลลังก์สูงได้
           if ((tpl.userData.h || 1) * zs > zMaxH) zs = zMaxH / (tpl.userData.h || 1);
           o.scale.setScalar(zs);
-          o.position.set(wx, hgt - 0.05, wz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
+          o.position.set(fpr.cx, hgt - 0.05, fpr.cz); // กึ่งกลาง footprint · ฝังฐานลงผิวเล็กน้อย ไม่ลอย
           o.rotation.y = Math.floor(rhash(c.col + 7, c.row + 3) * 4) * Math.PI / 2;
           if (c.specialZone === "throne") {
             o.traverse(n => { if (n.isMesh) { n.material = n.material.clone(); n.material.color.multiplyScalar(0.5); n.material.color.lerp(new THREE.Color(0x6a3aa0), 0.45); n.material.emissive = new THREE.Color(0x6a3aa0); n.material.emissiveIntensity = 0.4; } });
-            r.throneGlow.position.set(wx, hgt + 3, wz); r.throneGlow.intensity = 24;
-            buildThroneDecor(r, c.col, c.row, wx, hgt, wz); // กำแพงขาวเป็นวง + เสาไฟ/ธง รอบบัลลังก์
+            r.throneGlow.position.set(fpr.cx, hgt + 3, fpr.cz); r.throneGlow.intensity = 24;
+            buildThroneDecor(r, fpr.cx, hgt, fpr.cz, zs * (tpl.userData.fp || 1) / 2); // ธงขนาบบัลลังก์ (อิงขนาดโมเดลจริง)
           }
           r.propGroup.add(o);
         } else {
-          r.propGroup.add(groundFlag(wx, hgt, wz, zd?.color || "#c9a84c"));
+          r.propGroup.add(groundFlag(fpr.cx, hgt, fpr.cz, zd?.color || "#c9a84c"));
         }
         // ป้ายชื่อสถานที่ (toggle ได้) — ลอยเหนือ landmark
         if (zd?.name) {
           const lbl = labelSprite(zd.ico || "📍", zd.name, zd.color || "#c9a84c");
           const lift = (MULTI_TILE_ZONE.has(c.specialZone) ? 2.2 : 1.5) * Math.max(1, landScale);
-          lbl.position.set(wx, hgt + lift, wz); r.labelGroup.add(lbl);
+          lbl.position.set(fpr.cx, hgt + lift, fpr.cz); r.labelGroup.add(lbl);
         }
         continue; // ช่องอาคาร: ไม่วางพร็อพทับ
       }
@@ -574,11 +591,12 @@ function labelSprite(ico, name, color = "#c9a84c") {
   spr.renderOrder = 999; spr.scale.set(2.6, 0.65, 1); return spr;
 }
 // ตกแต่งบัลลังก์ — ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (กำแพงถูกถอดออกตามคำขอผู้ใช้)
-function buildThroneDecor(r, col0, row0, cx, cy, cz) {
-  // ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (ใกล้ศูนย์กลาง)
-  for (const sx of [-0.7, 0.7]) {
-    const banner = groundFlag(cx + sx, cy, cz - 0.8, "#7a3ad0");
-    banner.scale.setScalar(0.9); r.propGroup.add(banner);
+function buildThroneDecor(r, cx, cy, cz, halfW) {
+  // ธงราชวงศ์ 2 ผืนขนาบบัลลังก์ — ระยะอิงครึ่งความกว้างโมเดลจริง จึงอยู่ในกรอบ footprint เสมอ ไม่ยื่นพ้นขอบ
+  const off = Math.max(0.25, halfW * 0.9);
+  for (const sx of [-off, off]) {
+    const banner = groundFlag(cx + sx, cy, cz - off * 0.6, "#7a3ad0");
+    banner.scale.setScalar(0.7); r.propGroup.add(banner);
   }
 }
 function groundFlag(wx, top, wz, color) {
