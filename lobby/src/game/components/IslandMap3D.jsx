@@ -140,6 +140,28 @@ export default function IslandMap3D(props) {
     const ocean = new THREE.Mesh(new THREE.PlaneGeometry(400, 400, 200, 200), oceanMat);
     ocean.rotation.x = -Math.PI / 2; ocean.position.y = 0.32; ocean.receiveShadow = true; scene.add(ocean);
 
+    // ฟองคลื่นซัดชายฝั่ง — แถบ geometry แบนตามแนวขอบที่พื้นดินจรดน้ำ (สร้างใน rebuildBoard) ใช้ uTime ร่วมกับผิวน้ำ
+    const foamMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: waterUniforms.uTime },
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      vertexShader: `
+        varying vec2 vWorld; varying float vShore;
+        void main(){ vWorld = position.xz; vShore = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: `
+        uniform float uTime; varying vec2 vWorld; varying float vShore;
+        void main(){
+          float fade  = smoothstep(1.0, 0.12, vShore);                                   // เข้มที่ขอบฝั่ง จางเข้าทะเล
+          float s1    = sin(vWorld.x * 6.0 + vWorld.y * 6.0 + uTime * 2.2) * 0.5 + 0.5;
+          float s2    = sin(vWorld.x * 11.0 - vWorld.y * 9.0 - uTime * 1.6) * 0.5 + 0.5;
+          float surge = 0.55 + 0.45 * sin(uTime * 1.3 + (vWorld.x + vWorld.y) * 1.4);     // ฟองม้วนเข้า-ออก
+          float a = clamp(fade * (0.4 + 0.6 * s1 * s2) * surge, 0.0, 1.0) * 0.9;
+          if (a < 0.03) discard;
+          gl_FragColor = vec4(vec3(0.93, 0.98, 1.0), a);
+        }
+      `,
+    });
+
     const boardGroup = new THREE.Group(); scene.add(boardGroup);
     const propGroup = new THREE.Group(); scene.add(propGroup);
     const tokenGroup = new THREE.Group(); scene.add(tokenGroup);
@@ -157,6 +179,7 @@ export default function IslandMap3D(props) {
       GS: 0.5, boardSig: "", boardRadius: 10, animers: [], hoverKey: null,
       tokenByIdx: new Map(), walks: new Map(), seenTrail: {}, firstTokenBuild: true,
     };
+    R.current.foamMat = foamMat;
 
     const loader = new GLTFLoader();
     const names = [...new Set([...Object.values(ZONE_MODEL), ...Object.values(PROP)])];
@@ -298,6 +321,37 @@ export default function IslandMap3D(props) {
     });
     inst.instanceMatrix.needsUpdate = true; if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     r.terrain = inst; r.boardGroup.add(inst);
+
+    // ── ฟองคลื่นชายฝั่ง: แถบแบนตามขอบที่พื้นดินจรดน้ำ/ทะเลเปิด (รวมเป็น geometry ก้อนเดียว) ──
+    {
+      const at = new Map(); for (const c of cells) at.set(c.col + "," + c.row, c);
+      const isSea = (col, row) => { const c = at.get(col + "," + row); return !c || (c.biome || "grass") === "water"; }; // ไม่มีช่อง = ทะเลเปิด
+      const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      const D = 0.5, FY = 0.38, HALF = 0.49; // ความลึกแถบยื่นเข้าทะเล · ความสูงผิวน้ำ · ครึ่งความกว้างช่อง
+      const pos = [], uv = [], idx = []; let v = 0;
+      for (const c of cells) {
+        if ((c.biome || "grass") === "water") continue;        // เริ่มจากช่องพื้นดินเท่านั้น
+        const wx = c.col - ox, wz = c.row - oz;
+        for (const [dx, dz] of DIRS) {
+          if (!isSea(c.col + dx, c.row + dz)) continue;        // ขอบนี้ไม่ติดทะเล → ข้าม
+          const px = dz, pz = -dx;                              // เวกเตอร์ตั้งฉาก = แนวขอบ
+          const bx = wx + dx * HALF, bz = wz + dz * HALF;      // จุดกลางขอบฝั่ง
+          const e1x = bx + px * HALF, e1z = bz + pz * HALF, e2x = bx - px * HALF, e2z = bz - pz * HALF; // ขอบฝั่ง (vShore 0)
+          const i1x = e1x + dx * D, i1z = e1z + dz * D, i2x = e2x + dx * D, i2z = e2z + dz * D;         // ยื่นเข้าทะเล (vShore 1)
+          pos.push(e1x, FY, e1z, e2x, FY, e2z, i2x, FY, i2z, i1x, FY, i1z);
+          uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+          idx.push(v, v + 1, v + 2, v, v + 2, v + 3); v += 4;
+        }
+      }
+      if (idx.length) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+        g.setIndex(idx);
+        const foam = new THREE.Mesh(g, r.foamMat); foam.frustumCulled = false; foam.renderOrder = 2;
+        r.boardGroup.add(foam);
+      }
+    }
 
     // ── ของบนพื้น: อาคารโซน (สเกลตาม footprint) + ของตกแต่งไบโอม (วางบนผิว ไม่ลอย) ──
     for (const c of cells) {
