@@ -14,6 +14,7 @@ import LeftPanel from "./LeftPanel.jsx";
 import RightPanel from "./RightPanel.jsx";
 import IslandMap3D from "./IslandMap3D.jsx";
 import HandCard from "./HandCard.jsx";
+import CharIcon from "./CharIcon.jsx";
 import WinScreen from "./overlays/WinScreen.jsx";
 import DiceAnimation from "./overlays/DiceAnimation.jsx";
 import EventBanner from "./overlays/EventBanner.jsx";
@@ -663,9 +664,24 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             onClick={() => setShowLegend(v => !v)}
           >📍 Legend แมพ</button>
 
+          {/* ── END TURN — ปุ่มกรอบทอง/ดำ เข้าธีม (มุมขวาล่าง) ── */}
+          {isMyTurn ? (
+            <button className="endturn-ornate" onClick={endTurn} title="จบเทิร์นของคุณ">
+              <span className="et-crest">⚜️</span>
+              <span className="et-label">จบเทิร์น</span>
+              <span className="et-sub">END TURN</span>
+            </button>
+          ) : (
+            <div className="endturn-ornate waiting" title={`รอ ${currentPlayer?.name || ""}`}>
+              <span className="et-crest">⏳</span>
+              <span className="et-label">รอเทิร์น</span>
+              <span className="et-sub">{(currentPlayer?.name || "").slice(0, 12)}</span>
+            </div>
+          )}
+
           {/* ── Compass / Help ── */}
           <div style={{
-            position: "absolute", bottom: 12, right: 56,
+            position: "absolute", bottom: 56, left: 12,
             background: "rgba(13,11,8,.85)", border: "1px solid rgba(201,168,76,.3)",
             borderRadius: "8px", padding: "6px 10px", fontSize: "10px",
             color: "var(--txt-m)", lineHeight: "1.6", pointerEvents: "none",
@@ -862,11 +878,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                 <div className="strip-stat">💰<span>{me?.gold || 0}</span></div>
                 <div className="strip-stat">💧<span>{me?.mana ?? 0}/{me?.maxMana ?? 0}</span></div>
 
-                {/* End turn */}
-                {isMyTurn
-                  ? <button className="strip-end-btn" onClick={endTurn}>⏭<br/>จบ</button>
-                  : <div className="strip-wait">รอ...</div>
-                }
+                {/* End turn — ย้ายไปปุ่มกรอบทองมุมขวาล่างแมพ (.endturn-ornate) */}
               </div>
             );
           })()}
@@ -1096,7 +1108,9 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                   <div key={i} onClick={() => setStatusSel(i)}
                     style={{ background: isPicked ? "rgba(201,168,76,.12)" : "var(--s3)", border: `1.5px solid ${isPicked ? "var(--gold)" : p.alive ? "rgba(201,168,76,.2)" : "rgba(192,64,64,.3)"}`, borderRadius: "10px", padding: "12px", opacity: p.alive ? 1 : 0.6, cursor: "pointer", transition: "border-color .12s, background .12s", boxShadow: isPicked ? "0 0 14px rgba(201,168,76,.25)" : "none" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                      <span style={{ fontSize: "22px" }}>{p.alive ? cls?.ico : "💀"}</span>
+                      <span style={{ width: 30, height: 30, borderRadius: "50%", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "radial-gradient(circle at 38% 30%,#3a2d1a,#120c06)", border: `1.5px solid ${(CHARACTERS[p.charId]?.color || "var(--gold)")}` }}>
+                        {p.alive ? <CharIcon ch={CHARACTERS[p.charId]} size={30} /> : "💀"}
+                      </span>
                       <div>
                         <div style={{ fontSize: "12px", color: "var(--gold-l)", fontWeight: 600 }}>{p.name}{i === myIdx ? " (คุณ)" : ""}</div>
                         <div style={{ fontSize: "9px", color: "var(--txt-m)" }}>{role ? `${role.ico} ${role.name}` : "❓ บทบาทลับ"}</div>
@@ -1149,10 +1163,13 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
               );
               return (
                 <div style={{ marginTop: "14px", background: "rgba(0,0,0,.25)", border: `1px solid ${ch.color || "var(--gold)"}55`, borderRadius: "12px", padding: "14px 16px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "30px" }}>{ch.ico}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+                    <span style={{ width: 76, height: 76, borderRadius: "12px", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: "40px", background: "radial-gradient(circle at 38% 30%,#3a2d1a,#0e0a06)", border: `2px solid ${ch.color || "var(--gold)"}`, boxShadow: `0 0 14px ${(ch.color || "#c9a84c")}55` }}>
+                      <CharIcon ch={ch} size={76} round={false} />
+                    </span>
                     <div>
-                      <div style={{ fontFamily: "'Cinzel',serif", fontSize: "15px", color: ch.color || "var(--gold)" }}>{ch.name}{statusSel === myIdx ? " (คุณ)" : ""}</div>
+                      <div style={{ fontFamily: "'Cinzel',serif", fontSize: "16px", color: ch.color || "var(--gold)" }}>{ch.name}{statusSel === myIdx ? " (คุณ)" : ""}</div>
+                      {(() => { const r = ROLES[sp.role]; return <div style={{ fontSize: "10px", color: "var(--txt-m)", margin: "2px 0" }}>{r ? `${r.ico} ${r.name}` : "❓ บทบาทลับ"} · ❤ {sp.hp}/{sp.maxHp} · 💧 {sp.mana}/{sp.maxMana}</div>; })()}
                       <div style={{ fontSize: "11px", color: "var(--txt-m)", lineHeight: 1.5 }}>{ch.desc}</div>
                     </div>
                   </div>
