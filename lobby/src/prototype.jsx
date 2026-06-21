@@ -38,14 +38,17 @@ function Proto() {
 
   return (
     <div className="pt-root">
-      <div className="pt-map pt-map-static" />
-      <div className="pt-scrim" />
       <div className="pt-dev">
         <button onClick={() => { setOpenCard(-1); setLogOpen(false); setWaiting(false); }}>Battle</button>
         <button className={openCard === 0 ? "on" : ""} onClick={() => setOpenCard(openCard === 0 ? -1 : 0)}>Hover การ์ด</button>
         <button className={logOpen ? "on" : ""} onClick={() => setLogOpen(v => !v)}>Log</button>
         <button className={waiting ? "on" : ""} onClick={() => setWaiting(v => !v)}>รอเทิร์น</button>
       </div>
+
+      {/* จำลองบริบทจริง: HUD อยู่ใน .map-area (มี rule .map-area>* ที่เคยทำ position เพี้ยน) */}
+      <div className="map-area" style={{ position: "absolute", inset: 0 }}>
+      <div className="pt-map pt-map-static" />
+      <div className="pt-scrim" />
 
       {/* crest */}
       <div className="hud-crest">
@@ -129,6 +132,7 @@ function Proto() {
           {me.statusEffects.map((s, i) => <span key={i} className={`status-tag status-${s.type}`}>{s.type} {s.duration}t</span>)}
         </div>
       </div>
+      </div>{/* end .map-area */}
     </div>
   );
 }
