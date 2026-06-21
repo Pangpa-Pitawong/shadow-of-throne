@@ -144,11 +144,19 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [turnAnnounce, setTurnAnnounce] = useState(null);
   const [showCards, setShowCards] = useState(false);  // card drawer open/close
   const [logOpen, setLogOpen] = useState(false);      // HUD event log expand/collapse
+  const [showLabels, setShowLabels] = useState(false); // toggle ป้ายชื่อสถานที่บนแมพ
+  const logBodyRef = useRef(null);                     // เลื่อน log ไปล่างสุดเมื่อมี entry ใหม่/กางออก
   const [drawReveal, setDrawReveal] = useState(null); // { cards, flipped[] } — เปิดไพ่ที่จั่วได้
   const [drawSeen, setDrawSeen] = useState(false);     // เปิดไพ่ของเทิร์นนี้ดูแล้วหรือยัง
   const lastDrawKeyRef = useRef("");
   const [eventModal, setEventModal] = useState(null);  // การ์ดเหตุการณ์ท้ายเฟส (modal กลางจอ)
   const lastEventIdRef = useRef(0);
+
+  // event log: เลื่อนไปล่างสุดเมื่อมี entry ใหม่หรือกางออก (preserve history, ดูล่าสุดทันที)
+  useEffect(() => {
+    const el = logBodyRef.current;
+    if (el && logOpen) el.scrollTop = el.scrollHeight;
+  }, [log, logOpen]);
 
   useEffect(() => {
     if (!serverGameState) return;
@@ -587,6 +595,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             pendingMove={pendingMove}
             zones={EXTENDED_SPECIAL_ZONES}
             categoryColors={CATEGORY_COLORS}
+            showLabels={showLabels}
             recenter={recenterTok}
             onCellClick={handleCellClick}
             onCellHover={(cell, cx, cy) => {
@@ -739,13 +748,16 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           </div>
 
           {/* event log (ล่างกลาง, ย่อ/ขยายได้) */}
-          <div className={`hud-log ${logOpen ? "" : "collapsed"}`}>
-            <div className="hud-log-hd" onClick={() => setLogOpen(v => !v)}>
+          <div className={`hud-log ${logOpen ? "open" : "collapsed"}`}>
+            <div className="hud-log-hd" onClick={() => setLogOpen(v => !v)} title={logOpen ? "ย่อบันทึก" : "ขยายบันทึก"}>
               <span className="lh-t">📜 บันทึกเหตุการณ์</span>
+              {!logOpen && log.length > 0 && (
+                <span className="lh-sum">{log[log.length - 1].msg}</span>
+              )}
               <span className="lh-x">{logOpen ? "▼ ย่อ" : "▲ ขยาย"}</span>
             </div>
-            <div className="hud-log-body">
-              {(logOpen ? log.slice(-40) : log.slice(-1)).map((e, i) => (
+            <div className="hud-log-body" ref={logBodyRef}>
+              {log.slice(-50).map((e, i) => (
                 <div key={i} className={`hud-log-row ${e.type}`}>{e.msg}</div>
               ))}
             </div>
@@ -789,8 +801,8 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             {me?.pendingDiscard > 0 && (
               <div className="rail-warn">⚠ ต้องทิ้ง {me.pendingDiscard} ใบ</div>
             )}
-            {/* Hand cards — แนวนอน เด้งออกซ้ายเมื่อชี้ */}
-            <div className="rail-list">
+            {/* Hand cards — >5 ใบ ซ้อนเหลื่อม (fan) ชี้เมาส์ดันขึ้นหน้า */}
+            <div className={`rail-list${(me?.hand?.length || 0) > 5 ? " overlap" : ""}`}>
               {me?.hand?.map((card, ci) => (
                 <HandCard
                   key={card.uid || ci}
@@ -886,6 +898,16 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                   {deckReady && (
                     <span className="strip-badge" style={{ background:"#4cc94c", top:"-5px", left:"-5px", right:"auto" }}>!</span>
                   )}
+                </div>
+
+                {/* Location info toggle — ป้ายชื่อสถานที่บนแมพ */}
+                <div
+                  className={`strip-btn${showLabels ? " active-mode" : ""}`}
+                  onClick={() => setShowLabels(v => !v)}
+                  title="แสดง/ซ่อน ป้ายชื่อสถานที่บนแมพ"
+                >
+                  🗺️
+                  <label>สถานที่</label>
                 </div>
 
                 {/* Active skill */}

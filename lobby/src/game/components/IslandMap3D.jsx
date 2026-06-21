@@ -43,6 +43,8 @@ const BIG_PROP = new Set(["treeG", "pineG", "rockG", "mtn", "mtnL"]);
 // สเกลต่อชนิด (× r.GS) — กลุ่ม/ภูเขาเล็กลงนิดให้ไม่ล้นเกินไป
 const PROP_SCALE = { tree: 0.7, treeG: 0.6, pine: 0.72, pineG: 0.58, rock: 0.5, rock2: 0.52, rockG: 0.6, gold: 0.5, mtn: 0.8, mtnL: 0.92, logs: 0.5 };
 
+// โมเดลตกแต่ง landmark (ไม่ใช่อาคารโซน) — กำแพงจริงจาก asset pack รอบลานบัลลังก์
+const DECOR_MODEL = { wall: "WallTowers_FirstAge" };
 const HL = { reach: 0x4cc94c, attack: 0xe24b4a, trap: 0xe0962a, skill: 0xa060e0, sel: 0xc9a84c, pend: 0x7CFC7C };
 const frac = (n) => n - Math.floor(n);
 const rhash = (c, r) => frac(Math.sin(c * 12.9898 + r * 78.233) * 43758.5453);
@@ -101,6 +103,7 @@ export default function IslandMap3D(props) {
     const propGroup = new THREE.Group(); scene.add(propGroup);
     const tokenGroup = new THREE.Group(); scene.add(tokenGroup);
     const hlGroup = new THREE.Group(); scene.add(hlGroup);
+    const labelGroup = new THREE.Group(); labelGroup.visible = !!pr.current.showLabels; scene.add(labelGroup);
 
     const raycaster = new THREE.Raycaster();
     const ptr = new THREE.Vector2();
@@ -108,14 +111,14 @@ export default function IslandMap3D(props) {
 
     R.current = {
       ready: true, renderer, scene, cam, controls, throneGlow,
-      boardGroup, propGroup, tokenGroup, hlGroup, raycaster, ptr, clock,
+      boardGroup, propGroup, tokenGroup, hlGroup, labelGroup, raycaster, ptr, clock,
       tiles: [], cellWorld: new Map(), templates: {}, modelsReady: false,
       GS: 0.5, boardSig: "", boardRadius: 10, animers: [], hoverKey: null,
       tokenByIdx: new Map(), walks: new Map(), seenTrail: {}, firstTokenBuild: true,
     };
 
     const loader = new GLTFLoader();
-    const names = [...new Set([...Object.values(ZONE_MODEL), ...Object.values(PROP)])];
+    const names = [...new Set([...Object.values(ZONE_MODEL), ...Object.values(PROP), ...Object.values(DECOR_MODEL)])];
     const base = (import.meta.env.BASE_URL || "/");
     Promise.all(names.map(n => new Promise(res => {
       loader.load(`${base}models/gltf/${n}.gltf`,
@@ -168,6 +171,14 @@ export default function IslandMap3D(props) {
         if (a.type === "turn") { a.obj.position.y = a.baseY + Math.abs(Math.sin(t * 3)) * 0.35; a.obj.rotation.y = t * 1.2; }
         else if (a.type === "ring") a.obj.rotation.z = t * 1.5;
         else if (a.type === "pend") a.obj.material.opacity = 0.35 + Math.abs(Math.sin(t * 4)) * 0.4;
+        else if (a.type === "hl") {
+          const s = 0.5 + 0.5 * Math.sin(t * a.spd + a.ph);          // 0..1 pulse
+          a.fill.material.opacity = a.base * (0.55 + 0.45 * s);
+          a.fill.material.emissiveIntensity = 0.7 + 0.9 * s;
+          a.fill.position.y = a.y0 + s * 0.05;
+          if (a.ring) { a.ring.material.opacity = 0.45 + 0.55 * s; const k = 1 + s * 0.06; a.ring.scale.set(k, k, 1); }
+        }
+        else if (a.type === "torch") a.obj.intensity = a.base + Math.sin(t * 7 + a.ph) * a.base * 0.4;
       }
       // ── เดินทีละช่อง: เลื่อนโทเคนผ่าน waypoints (ทับ bob ของ turn) ──
       if (R.current.walks.size) {
@@ -208,17 +219,22 @@ export default function IslandMap3D(props) {
   useEffect(() => { if (R.current.ready) { animateTrails(); rebuildTokens(); } /* eslint-disable-next-line */ }, [props.players, props.currentTurn]);
   useEffect(() => { if (R.current.ready) rebuildHighlights(); /* eslint-disable-next-line */ },
     [props.reachableCells, props.attackableCells, props.trapCells, props.skillTargetCells, props.selectedCell, props.pendingMove, props.cells]);
+  useEffect(() => { if (R.current.ready && R.current.labelGroup) R.current.labelGroup.visible = !!props.showLabels; }, [props.showLabels]);
 
   // ── BOARD: voxel tiles + biome props + zone buildings ──────────────────────
   function rebuildBoard() {
     const r = R.current; if (!r.ready) return;
     const cells = pr.current.cells || []; if (!cells.length) return;
     clear(r.boardGroup); clear(r.propGroup); r.cellWorld.clear();
+    r.animers = r.animers.filter(a => a.type !== "torch"); // คบเพลิงเก่าถูกลบไปกับ propGroup แล้ว
     r.cellByInstance = []; r.terrain = null; r.throneGlow.intensity = 0;
 
+    clear(r.labelGroup);
     let maxC = 0, maxR2 = 0; for (const c of cells) { if (c.col > maxC) maxC = c.col; if (c.row > maxR2) maxR2 = c.row; }
     const ox = maxC / 2, oz = maxR2 / 2;
     r.boardRadius = Math.max(maxC, maxR2) * 0.5 + 1;
+    // landmark/structure scaling ตามขนาดแมพ — แมพใหญ่ → landmark อลังการขึ้น, แมพเล็ก → กระชับ
+    const landScale = THREE.MathUtils.clamp(r.boardRadius / 6.5, 0.92, 1.6);
 
     // ── พื้น: InstancedMesh ก้อนเดียว (รับกริดใหญ่ได้ลื่น) ──
     const geo = new THREE.BoxGeometry(0.98, 1, 0.98);
@@ -246,22 +262,31 @@ export default function IslandMap3D(props) {
       const biome = c.biome || "grass"; if (biome === "water") continue;
       const cw = r.cellWorld.get(c.key); const wx = cw.x, wz = cw.z, hgt = cw.top;
       if (c.specialZone) {
+        const zd = (pr.current.zones || {})[c.specialZone];
         const mn = ZONE_MODEL[c.specialZone], tpl = mn && r.templates[mn];
         if (tpl) {
           const o = tpl.clone(true);
           // อาคารหลายช่องจองช่องข้างไว้แล้ว → กว้างได้ตาม footprint; อาคารช่องเดียวบีบให้พอดีช่อง (ไม่ล้นขอบ)
-          const tiles = Math.min(ZONE_TILES[c.specialZone] || ZONE_TILE_DEF, MULTI_TILE_ZONE.has(c.specialZone) ? 99 : TILE_HALF * 2);
+          const multi = MULTI_TILE_ZONE.has(c.specialZone);
+          let tiles = Math.min(ZONE_TILES[c.specialZone] || ZONE_TILE_DEF, multi ? 99 : TILE_HALF * 2);
+          if (multi) tiles *= landScale; // landmark สเกลตามขนาดแมพ (เฉพาะอาคารหลายช่องที่จองพื้นที่ไว้)
           o.scale.setScalar(tiles / Math.max(0.4, tpl.userData.fp)); // กว้างเท่า footprint จริง
           o.position.set(wx, hgt - 0.05, wz); // ฝังฐานลงผิวเล็กน้อย → ไม่เห็นช่องว่างใต้ฐาน/ไม่ลอย
           o.rotation.y = Math.floor(rhash(c.col + 7, c.row + 3) * 4) * Math.PI / 2;
           if (c.specialZone === "throne") {
             o.traverse(n => { if (n.isMesh) { n.material = n.material.clone(); n.material.color.multiplyScalar(0.5); n.material.color.lerp(new THREE.Color(0x6a3aa0), 0.45); n.material.emissive = new THREE.Color(0x6a3aa0); n.material.emissiveIntensity = 0.4; } });
             r.throneGlow.position.set(wx, hgt + 3, wz); r.throneGlow.intensity = 24;
+            buildThroneDecor(r, c.col, c.row, wx, hgt, wz); // กำแพงขาวเป็นวง + เสาไฟ/ธง รอบบัลลังก์
           }
           r.propGroup.add(o);
         } else {
-          const zd = (pr.current.zones || {})[c.specialZone];
           r.propGroup.add(groundFlag(wx, hgt, wz, zd?.color || "#c9a84c"));
+        }
+        // ป้ายชื่อสถานที่ (toggle ได้) — ลอยเหนือ landmark
+        if (zd?.name) {
+          const lbl = labelSprite(zd.ico || "📍", zd.name, zd.color || "#c9a84c");
+          const lift = (MULTI_TILE_ZONE.has(c.specialZone) ? 2.2 : 1.5) * Math.max(1, landScale);
+          lbl.position.set(wx, hgt + lift, wz); r.labelGroup.add(lbl);
         }
         continue; // ช่องอาคาร: ไม่วางพร็อพทับ
       }
@@ -370,27 +395,39 @@ export default function IslandMap3D(props) {
   // ── HIGHLIGHTS ──────────────────────────────────────────────────────────────
   function rebuildHighlights() {
     const r = R.current; if (!r.ready || !r.cellWorld.size) return;
-    clear(r.hlGroup); r.animers = r.animers.filter(a => a.type === "turn" || a.type === "ring");
+    clear(r.hlGroup);
+    r.animers = r.animers.filter(a => a.type === "turn" || a.type === "ring" || a.type === "torch");
     rebuildTokens();
     const p = pr.current;
-    const disk = (key, color, op, raise, pend) => {
+    // glowing tile marker: bright emissive fill + animated outline ring (ชัดเจน แยกเดิน/โจมตีได้ทันที)
+    const disk = (key, color, op, raise, pulse, ringColor) => {
       const cw = r.cellWorld.get(key); if (!cw) return;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.08, 0.96), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, transparent: true, opacity: op }));
-      m.position.set(cw.x, cw.top + 0.05 + (raise || 0), cw.z); m.frustumCulled = false; r.hlGroup.add(m);
-      if (pend) r.animers.push({ type: "pend", obj: m });
+      const y = cw.top + 0.06 + (raise || 0);
+      const fill = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.06, 0.9),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, transparent: true, opacity: op }));
+      fill.position.set(cw.x, y, cw.z); fill.frustumCulled = false; r.hlGroup.add(fill);
+      // outline frame — square ring hugging the tile edge, glows for distance visibility
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.5, 0.62, 4, 1),
+        new THREE.MeshBasicMaterial({ color: ringColor || color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2; ring.rotation.z = Math.PI / 4;
+      ring.position.set(cw.x, y + 0.04, cw.z); ring.frustumCulled = false; r.hlGroup.add(ring);
+      if (pulse) r.animers.push({ type: "hl", fill, ring, base: op, y0: y, spd: pulse, ph: (cw.x + cw.z) * 1.3 });
     };
-    (p.reachableCells || []).forEach(c => disk(c.key, HL.reach, 0.34));
-    (p.attackableCells || []).forEach(c => disk(c.key, HL.attack, 0.4));
-    (p.skillTargetCells || []).forEach(c => disk(c.key, HL.skill, 0.45));
-    (p.trapCells || []).forEach(c => disk(c.key, HL.trap, 0.4));
+    // เดิน = เขียว-ฟ้าสว่าง + เต้นช้า  ·  โจมตี = แดง-ส้ม + เต้นเร็ว (แยกกันชัด)
+    (p.reachableCells || []).forEach(c => disk(c.key, HL.reach, 0.42, 0, 3.2, 0x9bffd6));
+    (p.attackableCells || []).forEach(c => disk(c.key, HL.attack, 0.5, 0.01, 5.2, 0xffb070));
+    (p.skillTargetCells || []).forEach(c => disk(c.key, HL.skill, 0.5, 0.01, 4.4, 0xd0a0ff));
+    (p.trapCells || []).forEach(c => disk(c.key, HL.trap, 0.45, 0, 4.0, 0xffd070));
     // กับดักบนแมพ — ปักธง 🪤 ให้เห็นชัดว่าช่องนี้มีกับดัก (ไม่ใช่แค่ไฮไลต์พื้น)
     (p.cells || []).filter(c => c.trap).forEach(c => {
       const cw = r.cellWorld.get(c.key); if (!cw) return;
-      disk(c.key, HL.trap, 0.5, 0.02);
+      disk(c.key, HL.trap, 0.5, 0.02, 4.0, 0xffd070);
       r.hlGroup.add(trapFlag(cw.x, cw.top, cw.z));
     });
-    if (p.selectedCell) disk(p.selectedCell.key, HL.sel, 0.5, 0.03);
-    if (p.pendingMove) disk(p.pendingMove.key, HL.pend, 0.6, 0.04, true);
+    if (p.selectedCell) disk(p.selectedCell.key, HL.sel, 0.55, 0.03, 3.0, 0xffe9a8);
+    if (p.pendingMove) disk(p.pendingMove.key, HL.pend, 0.65, 0.04, 6.0, 0xd6ffd6);
   }
 
   return <div ref={mountRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />;
@@ -415,6 +452,82 @@ function iconSprite(ico, ringColor, scale = 1) {
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
   spr.scale.set(0.85 * scale, 0.85 * scale, 1); return spr;
+}
+// ป้ายชื่อสถานที่ — แผ่นป้ายโปร่งใส ไอคอน + ชื่อ (billboard, อ่านได้ทุกมุมกล้อง)
+function labelSprite(ico, name, color = "#c9a84c") {
+  const cv = document.createElement("canvas"); cv.width = 512; cv.height = 128;
+  const ctx = cv.getContext("2d");
+  const text = `${ico}  ${name}`;
+  ctx.font = "600 52px 'Cinzel', serif";
+  const tw = Math.min(496, ctx.measureText(text).width + 44);
+  const x0 = (512 - tw) / 2;
+  // แผ่นพื้นโค้งมน + ขอบสีโซน
+  const rr = 26;
+  ctx.beginPath();
+  ctx.moveTo(x0 + rr, 28); ctx.arcTo(x0 + tw, 28, x0 + tw, 100, rr); ctx.arcTo(x0 + tw, 100, x0, 100, rr);
+  ctx.arcTo(x0, 100, x0, 28, rr); ctx.arcTo(x0, 28, x0 + tw, 28, rr); ctx.closePath();
+  ctx.fillStyle = "rgba(10,8,5,0.86)"; ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = color; ctx.stroke();
+  ctx.font = "600 46px 'Cinzel', serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#f0e2c0"; ctx.fillText(text, 256, 66);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
+  spr.renderOrder = 999; spr.scale.set(2.6, 0.65, 1); return spr;
+}
+// ทำให้กำแพงเป็นสีขาว (ทับสีโมเดลเดิม) + เปิดเงา
+function whitenWall(o) {
+  o.traverse(n => {
+    if (!n.isMesh) return;
+    n.castShadow = true; n.receiveShadow = true;
+    n.material = n.material.clone();
+    n.material.color = new THREE.Color(0xececf0);
+    if (n.material.map) n.material.map = null; // บังคับขาวล้วน ไม่ติดสีพื้นผิวเดิม
+    n.material.roughness = 0.7; n.material.metalness = 0.0;
+    if (n.material.emissive) n.material.emissiveIntensity = 0;
+  });
+}
+// ลานหลวงรอบบัลลังก์ — กำแพงขาวเรียงเป็นวง (เว้นจากขอบศาล ~2 ช่อง) + เสาไฟคบเพลิง + ธง
+function buildThroneDecor(r, col0, row0, cx, cy, cz) {
+  const wallTpl = r.templates[DECOR_MODEL.wall];
+  const R = 3;                 // ระยะวงกำแพง (ช่อง) — ขอบศาล ~±1 + เว้น 2 ช่อง = ±3
+  const gapRow = row0 + R;     // ช่องเว้นทางเข้า (ด้านหน้า +row)
+  // ── กำแพงขาว เรียงทีละช่องรอบขอบวงสี่เหลี่ยม วางตามความสูงพื้นจริง (ไม่ลอย) ──
+  if (wallTpl) {
+    const fp = Math.max(0.4, wallTpl.userData.fp);
+    const sLen = 1.04 / fp;    // ยาว ~1 ช่อง (เหลื่อมเล็กน้อย → ต่อเนื่อง)
+    for (let dc = -R; dc <= R; dc++) {
+      for (let dr = -R; dr <= R; dr++) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;   // เฉพาะขอบวง
+        const col = col0 + dc, row = row0 + dr;
+        if (col === col0 && row === gapRow) continue;               // เว้นช่องทางเข้า
+        const cw = r.cellWorld.get(`${col},${row}`); if (!cw) continue;
+        const w = wallTpl.clone(true);
+        whitenWall(w);
+        w.scale.set(sLen, sLen * 1.7, sLen);                        // สูงขึ้นให้ดูเป็นกำแพง
+        // ด้านซ้าย/ขวา (เสาคอลัมน์ dc=±R) หันแกนยาวตามแนว z; ด้านหน้า/หลังตามแนว x
+        w.rotation.y = (Math.abs(dc) === R && Math.abs(dr) !== R) ? Math.PI / 2 : 0;
+        w.position.set(cw.x, cw.top - 0.05, cw.z);
+        r.propGroup.add(w);
+      }
+    }
+  }
+  // ── เสาคบเพลิงขนาบช่องทางเข้า (วางที่วงกำแพง) + แสงวับ ──
+  const gate = r.cellWorld.get(`${col0},${gapRow}`);
+  if (gate) {
+    for (const sx of [-0.42, 0.42]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 1 }));
+      pole.position.set(gate.x + sx, gate.top + 0.55, gate.z); pole.castShadow = true; r.propGroup.add(pole);
+      const flame = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffb84a, emissive: 0xff7a1a, emissiveIntensity: 1.4 }));
+      flame.position.set(gate.x + sx, gate.top + 1.18, gate.z); r.propGroup.add(flame);
+      const light = new THREE.PointLight(0xff8a3a, 6, 6, 2); light.position.set(gate.x + sx, gate.top + 1.25, gate.z); r.propGroup.add(light);
+      r.animers.push({ type: "torch", obj: light, base: 6, ph: sx });
+    }
+  }
+  // ── ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (ใกล้ศูนย์กลาง) ──
+  for (const sx of [-0.7, 0.7]) {
+    const banner = groundFlag(cx + sx, cy, cz - 0.8, "#7a3ad0");
+    banner.scale.setScalar(0.9); r.propGroup.add(banner);
+  }
 }
 function groundFlag(wx, top, wz, color) {
   const g = new THREE.Group();
