@@ -43,8 +43,6 @@ const BIG_PROP = new Set(["treeG", "pineG", "rockG", "mtn", "mtnL"]);
 // สเกลต่อชนิด (× r.GS) — กลุ่ม/ภูเขาเล็กลงนิดให้ไม่ล้นเกินไป
 const PROP_SCALE = { tree: 0.7, treeG: 0.6, pine: 0.72, pineG: 0.58, rock: 0.5, rock2: 0.52, rockG: 0.6, gold: 0.5, mtn: 0.8, mtnL: 0.92, logs: 0.5 };
 
-// โมเดลตกแต่ง landmark (ไม่ใช่อาคารโซน) — กำแพงจริงจาก asset pack รอบลานบัลลังก์
-const DECOR_MODEL = { wall: "WallTowers_FirstAge" };
 const HL = { reach: 0x4cc94c, attack: 0xe24b4a, trap: 0xe0962a, skill: 0xa060e0, sel: 0xc9a84c, pend: 0x7CFC7C };
 const frac = (n) => n - Math.floor(n);
 const rhash = (c, r) => frac(Math.sin(c * 12.9898 + r * 78.233) * 43758.5453);
@@ -118,7 +116,7 @@ export default function IslandMap3D(props) {
     };
 
     const loader = new GLTFLoader();
-    const names = [...new Set([...Object.values(ZONE_MODEL), ...Object.values(PROP), ...Object.values(DECOR_MODEL)])];
+    const names = [...new Set([...Object.values(ZONE_MODEL), ...Object.values(PROP)])];
     const base = (import.meta.env.BASE_URL || "/");
     Promise.all(names.map(n => new Promise(res => {
       loader.load(`${base}models/gltf/${n}.gltf`,
@@ -252,7 +250,7 @@ export default function IslandMap3D(props) {
       colr.setHex(BIOME[biome] !== undefined ? BIOME[biome] : 0x6aa844);
       inst.setColorAt(i, colr);
       r.cellByInstance[i] = c;
-      r.cellWorld.set(c.key, { x: wx, z: wz, top: hgt });
+      r.cellWorld.set(c.key, { x: wx, z: wz, top: hgt, water: isWater, cell: c });
     });
     inst.instanceMatrix.needsUpdate = true; if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     r.terrain = inst; r.boardGroup.add(inst);
@@ -474,56 +472,105 @@ function labelSprite(ico, name, color = "#c9a84c") {
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
   spr.renderOrder = 999; spr.scale.set(2.6, 0.65, 1); return spr;
 }
-// ทำให้กำแพงเป็นสีขาว (ทับสีโมเดลเดิม) + เปิดเงา
-function whitenWall(o) {
-  o.traverse(n => {
-    if (!n.isMesh) return;
-    n.castShadow = true; n.receiveShadow = true;
-    n.material = n.material.clone();
-    n.material.color = new THREE.Color(0xececf0);
-    if (n.material.map) n.material.map = null; // บังคับขาวล้วน ไม่ติดสีพื้นผิวเดิม
-    n.material.roughness = 0.7; n.material.metalness = 0.0;
-    if (n.material.emissive) n.material.emissiveIntensity = 0;
-  });
-}
-// ลานหลวงรอบบัลลังก์ — กำแพงขาวเรียงเป็นวง (เว้นจากขอบศาล ~2 ช่อง) + เสาไฟคบเพลิง + ธง
+// ── ป้อมปราการบัลลังก์ — กำแพงขาวต่อเนื่องไร้รอยต่อ (procedural) + 4 ประตู + หอคอยมุม ──
+// สร้างเป็น "โครงสร้างเดียว": กล่องเต็มช่องชนกัน (ไม่มีช่องว่าง/ซ้อน), ฐานติดดิน + ยอดเรียบเสมอ (ไม่ลอย),
+// validate footprint ทุกช่องในวง (อยู่ในแมพ + บนพื้นดิน) ก่อนวาง → ไม่มีชิ้นนอกแมพ/ลอยน้ำ
 function buildThroneDecor(r, col0, row0, cx, cy, cz) {
-  const wallTpl = r.templates[DECOR_MODEL.wall];
-  const R = 3;                 // ระยะวงกำแพง (ช่อง) — ขอบศาล ~±1 + เว้น 2 ช่อง = ±3
-  const gapRow = row0 + R;     // ช่องเว้นทางเข้า (ด้านหน้า +row)
-  // ── กำแพงขาว เรียงทีละช่องรอบขอบวงสี่เหลี่ยม วางตามความสูงพื้นจริง (ไม่ลอย) ──
-  if (wallTpl) {
-    const fp = Math.max(0.4, wallTpl.userData.fp);
-    const sLen = 1.04 / fp;    // ยาว ~1 ช่อง (เหลื่อมเล็กน้อย → ต่อเนื่อง)
-    for (let dc = -R; dc <= R; dc++) {
-      for (let dr = -R; dr <= R; dr++) {
-        if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;   // เฉพาะขอบวง
-        const col = col0 + dc, row = row0 + dr;
-        if (col === col0 && row === gapRow) continue;               // เว้นช่องทางเข้า
-        const cw = r.cellWorld.get(`${col},${row}`); if (!cw) continue;
-        const w = wallTpl.clone(true);
-        whitenWall(w);
-        w.scale.set(sLen, sLen * 1.7, sLen);                        // สูงขึ้นให้ดูเป็นกำแพง
-        // ด้านซ้าย/ขวา (เสาคอลัมน์ dc=±R) หันแกนยาวตามแนว z; ด้านหน้า/หลังตามแนว x
-        w.rotation.y = (Math.abs(dc) === R && Math.abs(dr) !== R) ? Math.PI / 2 : 0;
-        w.position.set(cw.x, cw.top - 0.05, cw.z);
-        r.propGroup.add(w);
+  const get = (c, w) => r.cellWorld.get(`${c},${w}`);
+  const valid = (cw) => !!cw && !cw.water;                 // 24/25/26: ช่องต้องมีจริง + บนพื้นดิน
+  const ringScore = (R) => {                               // วง R สมบูรณ์แค่ไหน (สัดส่วนช่องที่ valid)
+    let ok = 0, tot = 0;
+    for (let dc = -R; dc <= R; dc++) for (let dr = -R; dr <= R; dr++) {
+      if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;
+      tot++; if (valid(get(col0 + dc, row0 + dr))) ok++;
+    }
+    return tot ? ok / tot : 0;
+  };
+
+  // 1) รัศมีที่สูงบัลลังก์ (plateau) — ไล่ออกจนพ้นไบโอมเงา/ที่สูง เพื่อวางกำแพงนอกที่สูง
+  let plateauR = 1;
+  for (let R = 1; R <= 8; R++) {
+    let high = 0, tot = 0;
+    for (let dc = -R; dc <= R; dc++) for (let dr = -R; dr <= R; dr++) {
+      if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;
+      const cw = get(col0 + dc, row0 + dr); if (!cw) continue; tot++;
+      const cl = cw.cell;
+      if (cl?.reserved || cl?.biome === "throne" || cl?.biome === "shadow" || cl?.specialZone === "throne") high++;
+    }
+    if (tot && high / tot >= 0.4) plateauR = R; else break;
+  }
+
+  // 2) เลือกรัศมีกำแพง: นอก plateau + เว้น ~2 ช่อง แล้ว validate ทั้งวง (เลือกวงที่สมบูรณ์สุด)
+  const desired = plateauR + 3;
+  let R = desired, best = -1;
+  for (let cand = Math.max(2, desired - 1); cand <= desired + 3; cand++) {
+    const s = ringScore(cand);
+    if (s > best + 1e-3) { best = s; R = cand; }
+    if (s >= 0.999) { R = cand; break; }                  // วงสมบูรณ์ → ใช้เลย
+  }
+
+  // 3) เก็บช่องในวงที่ valid + หาความสูงพื้นสูงสุด → ยอดกำแพงเรียบเสมอกัน (seamless)
+  const ring = [];
+  let maxTop = cy;
+  for (let dc = -R; dc <= R; dc++) for (let dr = -R; dr <= R; dr++) {
+    if (Math.max(Math.abs(dc), Math.abs(dr)) !== R) continue;
+    const cw = get(col0 + dc, row0 + dr);
+    if (!valid(cw)) continue;                              // ข้ามช่องนอกแมพ/น้ำ (anti-floating)
+    ring.push({ dc, dr, cw });
+    if (cw.top > maxTop) maxTop = cw.top;
+  }
+  const WALL_H = 0.6, TOWER_EXTRA = 0.5, WALL_T = 0.26, TOWER_W = 0.5, TOP = maxTop + WALL_H;
+
+  const stone = new THREE.MeshStandardMaterial({ color: 0xeceef2, roughness: 0.82, metalness: 0, flatShading: true });
+  const ember = new THREE.MeshStandardMaterial({ color: 0xffb84a, emissive: 0xff7a1a, emissiveIntensity: 1.4 });
+  const box = (w, h, d, mat) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.castShadow = true; m.receiveShadow = true; return m; };
+  // กล่องจากฐานพื้นช่อง(baseTop) ขึ้นไปถึง topY → ฐานติดดิน ยอดเสมอ (ไม่ลอย + seamless)
+  const grounded = (x, z, topY, baseTop, w, d) => { const h = Math.max(0.2, topY - baseTop); const m = box(w, h, d, stone); m.position.set(x, baseTop + h / 2, z); return m; };
+  // ใบเสมา (merlon) สลับฟันปลาบนยอดกำแพง
+  const merlons = (x, z, topY, along) => {
+    for (let k = 0; k < 3; k += 2) {
+      const off = -0.5 + 0.5 / 3 + (k / 3);
+      const mm = box(along === "x" ? 0.26 : WALL_T * 1.05, 0.18, along === "x" ? WALL_T * 1.05 : 0.26, stone);
+      mm.position.set(x + (along === "x" ? off : 0), topY + 0.09, z + (along === "x" ? 0 : off));
+      r.propGroup.add(mm);
+    }
+  };
+  const torch = (x, z, y) => {
+    const fl = box(0.13, 0.13, 0.13, ember); fl.position.set(x, y, z); r.propGroup.add(fl);
+    const light = new THREE.PointLight(0xff8a3a, 5, 5.5, 2); light.position.set(x, y + 0.15, z); r.propGroup.add(light);
+    r.animers.push({ type: "torch", obj: light, base: 5, ph: x + z });
+  };
+
+  const isCorner = (dc, dr) => Math.abs(dc) === R && Math.abs(dr) === R;
+  const isGate = (dc, dr) => (dc === 0 && Math.abs(dr) === R) || (dr === 0 && Math.abs(dc) === R); // 23: ประตู 4 ทิศ กลางด้าน
+
+  // 4) สร้างทีละช่อง — มุม=หอคอย, กลางด้าน=ประตู(เว้นช่องเดิน), อื่น=กำแพงตรง
+  for (const { dc, dr, cw } of ring) {
+    const along = Math.abs(dr) === R ? "x" : "z";          // บน/ล่าง=แนว x, ซ้าย/ขวา=แนว z
+    if (isCorner(dc, dr)) {
+      r.propGroup.add(grounded(cw.x, cw.z, TOP + TOWER_EXTRA, cw.top, TOWER_W, TOWER_W));
+      for (const ox2 of [-TOWER_W / 2 + 0.07, TOWER_W / 2 - 0.07]) for (const oz2 of [-TOWER_W / 2 + 0.07, TOWER_W / 2 - 0.07]) {
+        const mm = box(0.14, 0.2, 0.14, stone); mm.position.set(cw.x + ox2, TOP + TOWER_EXTRA + 0.1, cw.z + oz2); r.propGroup.add(mm);
       }
+    } else if (isGate(dc, dr)) {
+      const pierW = 0.28, gap = 0.46;                      // ช่องประตูกว้างพอให้ตัวละครเดินผ่าน
+      for (const s of [-1, 1]) {
+        const px = cw.x + (along === "x" ? s * (gap / 2 + pierW / 2) : 0);
+        const pz = cw.z + (along === "x" ? 0 : s * (gap / 2 + pierW / 2));
+        r.propGroup.add(grounded(px, pz, TOP + 0.14, cw.top, along === "x" ? pierW : WALL_T + 0.06, along === "x" ? WALL_T + 0.06 : pierW));
+        torch(cw.x + (along === "x" ? s * 0.5 : 0), cw.z + (along === "x" ? 0 : s * 0.5), TOP + 0.18);
+      }
+      // คานทับหลังเชื่อมเสาสองข้าง (ไม่มีช่องว่างด้านบนประตู → seamless)
+      const lintel = box(along === "x" ? gap + pierW * 2 : WALL_T + 0.06, 0.24, along === "x" ? WALL_T + 0.06 : gap + pierW * 2, stone);
+      lintel.position.set(cw.x, TOP - 0.12, cw.z); r.propGroup.add(lintel);
+      merlons(cw.x, cw.z, TOP, along);
+    } else {
+      r.propGroup.add(grounded(cw.x, cw.z, TOP, cw.top, along === "x" ? 1.02 : WALL_T, along === "x" ? WALL_T : 1.02));
+      merlons(cw.x, cw.z, TOP, along);
     }
   }
-  // ── เสาคบเพลิงขนาบช่องทางเข้า (วางที่วงกำแพง) + แสงวับ ──
-  const gate = r.cellWorld.get(`${col0},${gapRow}`);
-  if (gate) {
-    for (const sx of [-0.42, 0.42]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 1 }));
-      pole.position.set(gate.x + sx, gate.top + 0.55, gate.z); pole.castShadow = true; r.propGroup.add(pole);
-      const flame = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffb84a, emissive: 0xff7a1a, emissiveIntensity: 1.4 }));
-      flame.position.set(gate.x + sx, gate.top + 1.18, gate.z); r.propGroup.add(flame);
-      const light = new THREE.PointLight(0xff8a3a, 6, 6, 2); light.position.set(gate.x + sx, gate.top + 1.25, gate.z); r.propGroup.add(light);
-      r.animers.push({ type: "torch", obj: light, base: 6, ph: sx });
-    }
-  }
-  // ── ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (ใกล้ศูนย์กลาง) ──
+
+  // ธงราชวงศ์ 2 ผืนข้างบัลลังก์ (ใกล้ศูนย์กลาง)
   for (const sx of [-0.7, 0.7]) {
     const banner = groundFlag(cx + sx, cy, cz - 0.8, "#7a3ad0");
     banner.scale.setScalar(0.9); r.propGroup.add(banner);

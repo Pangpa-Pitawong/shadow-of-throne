@@ -66,6 +66,7 @@ function Preview() {
   const [showLabels, setShowLabels] = useState(true);
   const [logOpen, setLogOpen] = useState(false);
   const [bigHand, setBigHand] = useState(true);
+  const [statbarOpen, setStatbarOpen] = useState(true);
 
   useEffect(() => {
     const loop = [[1, 8], [1, 7], [2, 7], [3, 7], [3, 8], [5, 8], [7, 8], [7, 7], [8, 7], [8, 8], [7, 8], [5, 8], [3, 8], [1, 8]];
@@ -117,6 +118,31 @@ function Preview() {
           </div>
         </div>
 
+        {/* ── 28: แถบสถานะกลางล่าง ย่อ/ขยายได้ ── */}
+        <div className={`hud-statbar${statbarOpen ? " open" : " collapsed"}`}>
+          <button className="hud-sb-toggle cinzel" onClick={() => setStatbarOpen(v => !v)}>
+            {statbarOpen ? "▾ ย่อสถานะ" : "▴ สถานะ"}
+          </button>
+          <div className="hud-sb-portrait">
+            <div className="hud-sb-mini" style={{ fontSize: 22 }}>👑</div>
+            <div className="hud-sb-id">ซุนหวู่<small>👑 พระราชา</small></div>
+          </div>
+          <div className="hud-sb-summary">
+            <span className="sb-sum-it hp">❤️ 9/11</span>
+            <span className="sb-sum-it mp">💧 7/8</span>
+            <span className="sb-sum-it card">🂠 {hand.length}</span>
+          </div>
+          <div className="hud-sb-stats">
+            <div className="hud-coin hp"><span className="c-ico">❤️</span><span className="c-val">9/11</span><span className="c-lab">HP</span></div>
+            <div className="hud-coin mp"><span className="c-ico">💧</span><span className="c-val">7/8</span><span className="c-lab">มานา</span></div>
+            <div className="hud-sb-sep" />
+            <div className="hud-coin"><span className="c-ico">⚔️</span><span className="c-val">2</span><span className="c-lab">โจมตี</span></div>
+            <div className="hud-coin"><span className="c-ico">🛡️</span><span className="c-val">2</span><span className="c-lab">ป้องกัน</span></div>
+            <div className="hud-coin"><span className="c-ico">👟</span><span className="c-val">3</span><span className="c-lab">ความเร็ว</span></div>
+            <div className="hud-coin gold"><span className="c-ico">💰</span><span className="c-val">5</span><span className="c-lab">ทอง</span></div>
+          </div>
+        </div>
+
         {/* ── 16: right strip ใหญ่/ชัดขึ้น ── */}
         <div className="right-strip">
           <div className="strip-btn"><span style={{ pointerEvents: "none" }}>🃏</span><label>ไพ่</label><span className="strip-badge">{hand.length}</span></div>
@@ -134,6 +160,7 @@ function Preview() {
           <button className="tb-btn" onClick={() => setLogOpen(v => !v)}>Log: {logOpen ? "ขยาย" : "ย่อ"}</button>
           <button className="tb-btn" onClick={() => setShowLabels(v => !v)}>ป้ายสถานที่: {showLabels ? "เปิด" : "ปิด"}</button>
           <button className="tb-btn" onClick={() => setBigHand(v => !v)}>มือ: {bigHand ? "8 ใบ" : "3 ใบ"}</button>
+          <button className="tb-btn" onClick={() => setStatbarOpen(v => !v)}>แถบสถานะ: {statbarOpen ? "ขยาย" : "ย่อ"}</button>
         </div>
         <div style={{ position: "absolute", top: 46, left: 10, zIndex: 60, background: "rgba(0,0,0,.6)", padding: "5px 10px", borderRadius: 8, fontFamily: "monospace", fontSize: 11, color: "#c9a84c", maxWidth: 520, lineHeight: 1.5 }}>
           PREVIEW items 14–20 · เขียว=เดิน แดง=โจมตี (เรืองแสง+เต้น) · ลานบัลลังก์มีรั้ว/คบเพลิง/ธง · ป้ายชื่อสถานที่ · มือ 8 ใบซ้อนเหลื่อม · log ย่อ/ขยาย · แถบขวาใหญ่ขึ้น
