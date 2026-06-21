@@ -767,47 +767,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             </div>
           </div>
 
-          {/* stat bar: ผู้เล่นเรา (ล่างกลาง) — ย่อ/ขยายได้ (จำค่า) */}
-          {me && (
-            <div className={`hud-statbar${statbarOpen ? " open" : " collapsed"}`}>
-              {/* ปุ่มย่อ/ขยาย ธีมแฟนตาซี (ติดบนแถบ) */}
-              <button
-                className="hud-sb-toggle cinzel"
-                onClick={() => setStatbarOpen(v => !v)}
-                title={statbarOpen ? "ย่อแถบสถานะ" : "ขยายแถบสถานะ"}
-              >
-                {statbarOpen ? "▾ ย่อสถานะ" : "▴ สถานะ"}
-              </button>
-              <div className="hud-sb-portrait" onClick={() => { setStatusSel(myIdx >= 0 ? myIdx : 0); setShowStatus(true); }} title="ดูสถานะเต็ม">
-                <div className="hud-sb-mini">{me.alive ? <CharIcon ch={CHARACTERS[me.charId]} size={38} /> : "💀"}</div>
-                <div className="hud-sb-id">{me.name}<small>{ROLES[me.role] ? `${ROLES[me.role].ico} ${ROLES[me.role].name}` : "❓ ลับ"}</small></div>
-              </div>
-              {/* สรุปย่อ (เห็นเฉพาะตอนย่อ) — HP / มานา / จำนวนการ์ด */}
-              <div className="hud-sb-summary">
-                <span className="sb-sum-it hp">❤️ {me.hp}/{me.maxHp}</span>
-                <span className="sb-sum-it mp">💧 {me.mana}/{me.maxMana}</span>
-                <span className="sb-sum-it card">🂠 {me.hand?.length || 0}</span>
-              </div>
-              {/* สถิติเต็ม (ยุบด้วย CSS ตอนย่อ — ยังmountอยู่ ไม่กระทบ logic) */}
-              <div className="hud-sb-stats">
-                <div className="hud-coin hp"><span className="c-ico">❤️</span><span className="c-val">{me.hp}/{me.maxHp}</span><span className="c-lab">HP</span></div>
-                <div className="hud-coin mp"><span className="c-ico">💧</span><span className="c-val">{me.mana}/{me.maxMana}</span><span className="c-lab">มานา</span></div>
-                <div className="hud-sb-sep" />
-                <div className="hud-coin"><span className="c-ico">⚔️</span><span className="c-val">{me.atk}</span><span className="c-lab">โจมตี</span></div>
-                <div className="hud-coin"><span className="c-ico">🛡️</span><span className="c-val">{me.def}</span><span className="c-lab">ป้องกัน</span></div>
-                <div className="hud-sb-sep" />
-                <div className="hud-coin"><span className="c-ico">👟</span><span className="c-val">{me.move}</span><span className="c-lab">ความเร็ว</span></div>
-                <div className="hud-coin"><span className="c-ico">🎯</span><span className="c-val">{me.range ?? 0}</span><span className="c-lab">ระยะ</span></div>
-                <div className="hud-sb-sep" />
-                <div className="hud-coin gold"><span className="c-ico">💰</span><span className="c-val">{me.gold}</span><span className="c-lab">ทอง</span></div>
-              </div>
-              {statbarOpen && me.statusEffects?.length > 0 && (
-                <div className="hud-sb-fx">
-                  {me.statusEffects.map((s, i) => <span key={i} className={`status-tag status-${s.type}`}>{s.type} {s.duration}t</span>)}
-                </div>
-              )}
-            </div>
-          )}
+          {/* แถบสถานะแนวนอนเดิมถูกยุบเข้า right-strip (คอลัมน์ขวา) — ดูส่วน strip-stat */}
 
           {/* ── CARD RAIL — มือผู้เล่นติดขอบขวา (เห็นตลอด) · ชี้เมาส์ = การ์ดเด้งออกแนวนอน ── */}
           <div className={`hand-rail${showCards ? " collapsed" : ""}`}>
@@ -976,10 +936,29 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
                 <div className="strip-spacer" />
 
-                {/* Stats */}
+                {/* ── สถานะผู้เล่นเรา (ยุบจากแถบแนวนอนเดิม มาเป็นแนวตั้ง) ── */}
+                {me && (
+                  <>
+                    <div className="strip-sep" />
+                    <div
+                      className="strip-portrait"
+                      onClick={() => { setStatusSel(myIdx >= 0 ? myIdx : 0); setShowStatus(true); }}
+                      title="ดูสถานะเต็ม"
+                    >
+                      {me.alive ? <CharIcon ch={CHARACTERS[me.charId]} size={32} /> : "💀"}
+                    </div>
+                    <div className="strip-stat hp">❤️<span>{me.hp}/{me.maxHp}</span></div>
+                    <div className="strip-stat mp">💧<span>{me.mana ?? 0}/{me.maxMana ?? 0}</span></div>
+                    <div className="strip-stat">⚔️<span>{me.atk}</span></div>
+                    <div className="strip-stat">🛡️<span>{me.def}</span></div>
+                    <div className="strip-stat">👟<span>{me.move}</span></div>
+                    <div className="strip-stat">🎯<span>{me.range ?? 0}</span></div>
+                    <div className="strip-stat gold">💰<span>{me.gold || 0}</span></div>
+                    <div className="strip-sep" />
+                  </>
+                )}
+                {/* Stats รวม (เฟส) */}
                 <div className="strip-stat">เฟส<span>{phase}/{maxPhases}</span></div>
-                <div className="strip-stat">💰<span>{me?.gold || 0}</span></div>
-                <div className="strip-stat">💧<span>{me?.mana ?? 0}/{me?.maxMana ?? 0}</span></div>
 
                 {/* End turn — ย้ายไปปุ่มกรอบทองมุมขวาล่างแมพ (.endturn-ornate) */}
               </div>

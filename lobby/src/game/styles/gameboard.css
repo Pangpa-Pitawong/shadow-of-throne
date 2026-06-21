@@ -31,7 +31,8 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 .right-panel{position:absolute;top:0;right:48px;width:190px;height:100%;background:rgba(10,8,5,.62);backdrop-filter:blur(5px);border-left:1px solid rgba(201,168,76,.1);overflow-y:auto;padding:10px;z-index:10;pointer-events:auto}
 
 /* ── RIGHT STRIP — icon bar on far right of map ── */
-.right-strip{position:absolute;top:0;right:0;width:66px;height:100%;background:linear-gradient(180deg,rgba(20,13,7,.94),rgba(11,8,4,.96));border-left:2px solid rgba(201,168,76,.4);box-shadow:-4px 0 16px rgba(0,0,0,.45);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:9px;z-index:20}
+.right-strip{position:absolute;top:0;right:0;width:66px;height:100%;background:linear-gradient(180deg,rgba(20,13,7,.94),rgba(11,8,4,.96));border-left:2px solid rgba(201,168,76,.4);box-shadow:-4px 0 16px rgba(0,0,0,.45);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:9px;z-index:20;overflow-y:auto;overflow-x:hidden}
+.right-strip::-webkit-scrollbar{width:0}
 .strip-btn{width:54px;height:54px;background:linear-gradient(180deg,rgba(40,29,16,.96),rgba(26,18,10,.96));border:1.5px solid rgba(201,168,76,.4);border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:24px;gap:2px;transition:transform .12s,border-color .14s,background .14s,box-shadow .14s;position:relative;flex-shrink:0;color:var(--gold);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 2px 6px rgba(0,0,0,.4)}
 .strip-btn:hover{border-color:var(--gold-l);background:linear-gradient(180deg,rgba(201,168,76,.22),rgba(120,90,30,.18));transform:translateX(-3px) scale(1.06);box-shadow:0 0 14px rgba(201,168,76,.5)}
 .strip-btn.active-mode{border-color:#c07aff;background:linear-gradient(180deg,rgba(160,90,224,.34),rgba(90,40,150,.28));box-shadow:0 0 16px rgba(160,96,224,.6),inset 0 0 8px rgba(160,96,224,.35)}
@@ -41,6 +42,13 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 .strip-spacer{flex:1}
 .strip-stat{font-size:9.5px;color:var(--txt-m);text-align:center;line-height:1.5;width:100%;padding:0 2px}
 .strip-stat span{color:var(--gold-l);display:block;font-size:12px;font-weight:700}
+.strip-stat.hp span{color:#ff9a9a}.strip-stat.mp span{color:#9ab8ff}.strip-stat.gold span{color:#f0d080}
+/* เส้นคั่นบาง ๆ ในแถบ */
+.strip-sep{width:38px;height:1px;flex-shrink:0;background:rgba(201,168,76,.25)}
+/* รูปตัวละครเรา (กดเปิดสถานะเต็ม) */
+.strip-portrait{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;font-size:22px;
+  background:radial-gradient(circle at 38% 30%,#3a2d1a,#120c06);border:2px solid var(--gold);transition:transform .12s,box-shadow .14s}
+.strip-portrait:hover{transform:scale(1.07);box-shadow:0 0 12px rgba(201,168,76,.55)}
 .strip-end-btn{width:36px;padding:5px 0;background:linear-gradient(135deg,var(--gold-d),var(--gold));color:#0a0908;border:none;border-radius:8px;font-size:8px;font-weight:700;cursor:pointer;text-align:center;line-height:1.5;flex-shrink:0;transition:filter .14s}
 .strip-end-btn:hover{filter:brightness(1.12)}
 .strip-end-btn:disabled{background:rgba(201,168,76,.12);color:var(--txt-d);cursor:not-allowed}
