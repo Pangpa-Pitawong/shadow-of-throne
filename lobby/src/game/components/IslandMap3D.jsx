@@ -24,10 +24,10 @@ const ZONE_MODEL = {
   graveyard: "Rock_Group",
 };
 // footprint อาคารเป็น "จำนวนช่อง" → สเกลโมเดลให้กว้างเท่ากับ footprint จริง (occupancy ตรง)
-const ZONE_TILES = { throne: 2.6, palace: 1.7, volcano: 1.6, market: 1.4, rebel_camp: 1.4, village: 1.3, cave: 1.3, dungeon: 1.3, oasis: 1.2, treasure: 1.0 };
+const ZONE_TILES = { throne: 2.1, palace: 1.5, volcano: 1.45, market: 1.3, rebel_camp: 1.3, village: 1.25, cave: 1.25, dungeon: 1.25, oasis: 1.15, treasure: 1.0 };
 const ZONE_TILE_DEF = 0.95;
 // ครึ่งความกว้างผิวช่อง (ช่องกว้าง 0.98) — โมเดล "ตัวเดี่ยว/พร็อพ" ต้องอยู่ในกรอบนี้ทั้งหมด ไม่ล้นขอบ
-const TILE_HALF = 0.46;
+const TILE_HALF = 0.43;
 // ฐานล้นได้เฉพาะอาคารหลายช่อง (จองช่องข้างไว้แล้ว) — นอกเหนือจากนี้ทุกโมเดลถูกบีบให้พอดีช่อง
 const MULTI_TILE_ZONE = new Set(["throne", "palace", "volcano", "market", "rebel_camp", "village", "cave", "dungeon", "oasis"]);
 // โมเดลตกแต่งภูมิประเทศ — มีทั้ง "ตัวเดี่ยว" (พอดี 1 ช่อง) และ "กลุ่ม" (ของชิ้นใหญ่ วางกลางช่อง ล้นขอบได้แต่ฐานไม่ลอย)
@@ -100,11 +100,11 @@ export default function IslandMap3D(props) {
         uniform float uTime;
         float wv(vec2 p, float t){
           float h = 0.0;
-          h += sin(p.x * 0.17 + t * 1.05) * 0.16;
-          h += sin(p.y * 0.21 - t * 0.85) * 0.13;
-          h += sin((p.x + p.y) * 0.13 + t * 1.35) * 0.10;
-          h += sin((p.x - p.y) * 0.26 - t * 1.60) * 0.06;
-          return h;
+          h += sin(p.x * 0.17 + t * 1.05) * 0.045;
+          h += sin(p.y * 0.21 - t * 0.85) * 0.035;
+          h += sin((p.x + p.y) * 0.13 + t * 1.35) * 0.022;
+          h += sin((p.x - p.y) * 0.26 - t * 1.60) * 0.013;
+          return h;                                  // รวม ~0.115 → ยอดคลื่นไม่พ้นช่องพื้นเตี้ย (0.55) ไม่ทะลักเข้าแมพ
         }
         varying float vWaveH;
       `;
@@ -138,7 +138,7 @@ export default function IslandMap3D(props) {
       );
     };
     const ocean = new THREE.Mesh(new THREE.PlaneGeometry(400, 400, 200, 200), oceanMat);
-    ocean.rotation.x = -Math.PI / 2; ocean.position.y = 0.32; ocean.receiveShadow = true; scene.add(ocean);
+    ocean.rotation.x = -Math.PI / 2; ocean.position.y = 0.38; ocean.receiveShadow = true; scene.add(ocean);
 
     // ฟองคลื่นซัดชายฝั่ง — แถบ geometry แบนตามแนวขอบที่พื้นดินจรดน้ำ (สร้างใน rebuildBoard) ใช้ uTime ร่วมกับผิวน้ำ
     const foamMat = new THREE.ShaderMaterial({
@@ -299,7 +299,7 @@ export default function IslandMap3D(props) {
     const ox = maxC / 2, oz = maxR2 / 2;
     r.boardRadius = Math.max(maxC, maxR2) * 0.5 + 1;
     // landmark/structure scaling ตามขนาดแมพ — แมพใหญ่ → landmark อลังการขึ้น, แมพเล็ก → กระชับ
-    const landScale = THREE.MathUtils.clamp(r.boardRadius / 8, 0.85, 1.12);
+    const landScale = THREE.MathUtils.clamp(r.boardRadius / 8, 0.85, 1.0); // ไม่ขยายเกิน 1 → แมพใหญ่ landmark ไม่บวมล้น footprint ที่จองไว้
 
     // ── พื้น: InstancedMesh ก้อนเดียว (รับกริดใหญ่ได้ลื่น) ──
     const geo = new THREE.BoxGeometry(0.98, 1, 0.98);
@@ -327,7 +327,7 @@ export default function IslandMap3D(props) {
       const at = new Map(); for (const c of cells) at.set(c.col + "," + c.row, c);
       const isSea = (col, row) => { const c = at.get(col + "," + row); return !c || (c.biome || "grass") === "water"; }; // ไม่มีช่อง = ทะเลเปิด
       const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-      const D = 0.5, FY = 0.38, HALF = 0.49; // ความลึกแถบยื่นเข้าทะเล · ความสูงผิวน้ำ · ครึ่งความกว้างช่อง
+      const D = 0.5, FY = 0.40, HALF = 0.49; // ความลึกแถบยื่นเข้าทะเล · ความสูงผิวน้ำ (พอดีผิวทะเลที่สงบลง) · ครึ่งความกว้างช่อง
       const pos = [], uv = [], idx = []; let v = 0;
       for (const c of cells) {
         if ((c.biome || "grass") === "water") continue;        // เริ่มจากช่องพื้นดินเท่านั้น
