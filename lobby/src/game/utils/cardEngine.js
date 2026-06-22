@@ -279,6 +279,11 @@ export function equipWeapon(gs, player, card, ctx) {
   const wearingHeavyWeapon = equip.some(e => e.slot === "weapon" && (e.atk || 0) >= 4);
   if ((card.tag || []).includes("no_heavy") && wearingHeavyWeapon) return { error: "ใช้ร่วมกับอาวุธหนักไม่ได้" };
 
+  // จำกัดอุปกรณ์สูงสุด 2 ชิ้น — ต้องถอดอันเก่าก่อน
+  if (equip.length >= 2) {
+    return { needsSwap: true, currentEquipment: [...equip] };
+  }
+
   player.equipment = [...equip, {
     id: card.id, name: card.name, ico: card.ico, slot: card.slot || "weapon",
     atk: card.atk || 0, def: card.def || 0, range: card.range || 0, magicAtk: card.magicAtk || 0,

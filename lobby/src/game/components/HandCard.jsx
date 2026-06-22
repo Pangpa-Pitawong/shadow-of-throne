@@ -2,9 +2,10 @@
 import { RARITY, normRarity } from "../constants/cards.js";
 
 const TYPE_LABEL = {
-  weapon: "🗡️ อาวุธ/เกราะ",
-  magic:  "🔮 เวทย์",
-  trap:   "🪤 กับดัก",
+  weapon:   "🗡️ อาวุธ/เกราะ",
+  magic:    "🔮 เวทย์",
+  trap:     "🪤 กับดัก",
+  betrayer: "🗡️ ตราทรยศ",
 };
 
 const ELEMENT_ICO = {
@@ -43,6 +44,17 @@ export default function HandCard({ card, isSelected, isMyTurn, onSelect, onHover
       <span className="card-ico">{card.ico}{elIco}</span>
       <div className="card-nm">{card.name}</div>
       <div className="card-desc">{card.desc}</div>
+      {card.type === "weapon" && (card.atk > 0 || card.def > 0 || card.range > 0 || card.magicAtk > 0) && (
+        <div style={{ fontSize: "9px", marginTop: "3px", color: "#c0a060", display: "flex", gap: "5px", flexWrap: "wrap" }}>
+          {card.atk  > 0 && <span>⚔️+{card.atk}</span>}
+          {card.def  > 0 && <span>🛡️+{card.def}</span>}
+          {card.range > 0 && <span>🎯{card.range}</span>}
+          {card.magicAtk > 0 && <span>✨+{card.magicAtk}</span>}
+        </div>
+      )}
+      {card.type === "betrayer" && (
+        <div style={{ fontSize: "8px", marginTop: "3px", color: "#c060c0", fontStyle: "italic" }}>⚠️ ทำงานอัตโนมัติสิ้นเฟส</div>
+      )}
       <div style={{ fontSize: "8px", marginTop: "3px", color: "var(--txt-d)" }}>
         {TYPE_LABEL[card.type] || "การ์ด"}
         {card.type === "magic" && card.cost != null ? ` · 💧${card.cost}` : ""}

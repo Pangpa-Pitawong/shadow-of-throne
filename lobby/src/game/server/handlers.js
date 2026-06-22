@@ -263,8 +263,6 @@ export function handleGameAction(ws, msg) {
 
     // ── ใช้การ์ด — route ผ่าน cardEngine (single source of truth) ───────────
     case "use_card": {
-      if ((gs.actionsDone.cardsPlayed || 0) >= MAX_CARDS_PER_TURN)
-        return send(ws, { type: "error", msg: `ใช้การ์ดครบ ${MAX_CARDS_PER_TURN} ใบในเทิร์นนี้แล้ว` });
       if (cp.pendingDiscard > 0) return send(ws, { type: "error", msg: "ต้องเลือกทิ้งการ์ดที่เกินมือก่อน" });
       const { cardUid, targetCol, targetRow } = payload;
       const cardIdx = cp.hand.findIndex(c => c.uid === cardUid);
@@ -290,6 +288,12 @@ export function handleGameAction(ws, msg) {
         if (result?.teleportedTo) checkQuestProgress(cp, result.teleportedTo, gs);
       } else if (card.type === "weapon") {
         result = equipWeapon(gs, cp, card, CARD_CTX);
+        // ถึงลิมิต 2 ชิ้น — แจ้ง client เปิด swap dialog
+        if (result?.needsSwap) {
+          return send(ws, { type: "equip_swap_needed", currentEquipment: result.currentEquipment, newCardUid: cardUid });
+        }
+      } else if (card.type === "betrayer") {
+        return send(ws, { type: "error", msg: "ตราทรยศจะทำงานอัตโนมัติเมื่อสิ้นเฟส — ไม่สามารถใช้งานได้โดยตรง" });
       } else if (card.type === "trap") {
         if (!targetCell) return send(ws, { type: "error", msg: "เลือกช่องวางกับดัก" });
         // วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง
@@ -322,6 +326,31 @@ export function handleGameAction(ws, msg) {
       const [discarded] = cp.hand.splice(idx, 1);
       enforceHandLimit(cp);
       pushLog(gs, `🗑️ ${cp.name} ทิ้งการ์ด "${discarded.name}"${cp.pendingDiscard > 0 ? ` (เหลือต้องทิ้งอีก ${cp.pendingDiscard})` : ""}`, "");
+      broadcastGameState(info.code);
+      break;
+    }
+
+    // ── สลับอุปกรณ์ — ถอดชิ้นเก่า + สวมใส่ชิ้นใหม่ในครั้งเดียว ──────────────
+    case "swap_equip": {
+      const { removeEquipId, newCardUid } = payload;
+      const newCardIdx = cp.hand.findIndex(c => c.uid === newCardUid);
+      if (newCardIdx < 0) return send(ws, { type: "error", msg: "ไม่พบการ์ดในมือ" });
+      const newCard = cp.hand[newCardIdx];
+      if (newCard.type !== "weapon") return send(ws, { type: "error", msg: "ต้องเป็นการ์ดอาวุธ/เกราะ" });
+      const removeIdx = (cp.equipment || []).findIndex(e => e.id === removeEquipId);
+      if (removeIdx < 0) return send(ws, { type: "error", msg: "ไม่พบอุปกรณ์ที่ต้องการถอด" });
+      const removed = cp.equipment.splice(removeIdx, 1)[0];
+      recomputeStats(cp, gs);
+      const result2 = equipWeapon(gs, cp, newCard, CARD_CTX);
+      if (result2?.error) {
+        cp.equipment.splice(removeIdx, 0, removed); // rollback
+        recomputeStats(cp, gs);
+        return send(ws, { type: "error", msg: result2.error });
+      }
+      cp.hand.splice(newCardIdx, 1);
+      enforceHandLimit(cp);
+      gs.actionsDone.cardsPlayed = (gs.actionsDone.cardsPlayed || 0) + 1;
+      pushLog(gs, `🔄 ${cp.name} เปลี่ยนอุปกรณ์ — ถอด "${removed.name}" แล้วสวม "${newCard.name}"`, "");
       broadcastGameState(info.code);
       break;
     }

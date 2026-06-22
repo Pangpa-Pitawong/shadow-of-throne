@@ -2,8 +2,8 @@
 import { ALL_CARDS } from "../constants/cards.js";
 import { CHARACTERS } from "../constants/characters.js";
 
-// กติกา: ใช้การ์ดได้ไม่เกิน N ใบต่อเทิร์น
-export const MAX_CARDS_PER_TURN = 4;
+// กติกา: ไม่จำกัดการ์ดต่อเทิร์น (ใช้เงื่อนไขของการ์ดแต่ละใบแทน)
+export const MAX_CARDS_PER_TURN = 99;
 
 // กติกา: ค่าการเดินต่อเทิร์น (งบเดิน) — หักด้วยต้นทุนภูมิประเทศของเส้นทาง
 export const BASE_MOVE_BUDGET = 5;

@@ -141,6 +141,11 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [showStatus, setShowStatus] = useState(false); // ช่องดูสถานะผู้เล่นทุกคน
   const [statusSel, setStatusSel] = useState(null);     // index ผู้เล่นที่เลือกดูข้อมูลตัวละครในหมวดสถานะ
   const [showQuest, setShowQuest] = useState(false);   // อ่านเควสรองของตัวเองซ้ำ (ลับเฉพาะตัว)
+  const [questStatusMode, setQuestStatusMode] = useState(false); // เปิดสถานะจากหน้าเลือกเควส
+  const [equipSwapDialog, setEquipSwapDialog] = useState(null); // { newCard, currentEquip } — เลือกถอดชิ้นเก่า
+  const [notifications, setNotifications] = useState([]); // floating toast notifications
+  const lastNotifTsRef = useRef(0);
+  const notifIdRef = useRef(0);
   const [turnAnnounce, setTurnAnnounce] = useState(null);
   const [showCards, setShowCards] = useState(false);  // card drawer open/close
   const [logOpen, setLogOpen] = useState(false);      // HUD event log expand/collapse
@@ -200,6 +205,25 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     if (er && er.id && er.id !== lastEventIdRef.current) {
       lastEventIdRef.current = er.id;
       setEventModal(er);
+    }
+
+    // ── Notification toasts — แสดงข้อความสำคัญในรูปแบบ floating toast ──
+    const newLog = serverGameState.log ?? [];
+    const newEntries = newLog.filter(e => (e.ts || 0) > lastNotifTsRef.current);
+    if (newEntries.length > 0) {
+      lastNotifTsRef.current = Math.max(...newEntries.map(e => e.ts || 0));
+      const NOTIF_TYPES = new Set(["dmg", "heal", "death", "win", "event"]);
+      const important = newEntries.filter(e =>
+        NOTIF_TYPES.has(e.type) ||
+        e.msg.includes("สวมใส่") || e.msg.includes("กับดัก") ||
+        e.msg.includes("ทรยศ") || e.msg.includes("เควส") ||
+        e.msg.includes("สำเร็จ") || e.msg.includes("บัฟ")
+      );
+      for (const e of important.slice(0, 3)) {
+        const id = ++notifIdRef.current;
+        setNotifications(prev => [...prev.slice(-4), { id, msg: e.msg, type: e.type }]);
+        setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 3500);
+      }
     }
 
   }, [serverGameState]);
@@ -773,7 +797,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
           <div className={`hand-rail${showCards ? " collapsed" : ""}`}>
             <div className="rail-head">
               <span>🂠 {me?.hand?.length || 0}/{Math.min(10, Math.max(1, me?.hp || 1))}</span>
-              {(actionsDone.cardsPlayed || 0) > 0 && <span style={{ color:"var(--txt-m)" }}>ใช้ {actionsDone.cardsPlayed}/4</span>}
+              {(actionsDone.cardsPlayed || 0) > 0 && <span style={{ color:"var(--txt-m)" }}>ใช้ {actionsDone.cardsPlayed} ใบ</span>}
               {(isMyTurn && !drawReveal && !drawSeen && (me?.justDrew?.length > 0)) && (
                 <button className="rail-deck" onClick={reopenDraw} title="เปิดไพ่ที่จั่วได้">จั่ว!</button>
               )}
@@ -805,11 +829,18 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
             {selectedCard && isMyTurn && (
               <button
                 className="rail-use tb-btn primary"
-                disabled={(actionsDone.cardsPlayed || 0) >= 4}
+                disabled={selectedCard.type === "betrayer"}
+                title={selectedCard.type === "betrayer" ? "ตราทรยศทำงานอัตโนมัติสิ้นเฟส" : undefined}
                 onClick={() => {
                   const c = selectedCard;
-                  if (!c || !isMyTurn || (actionsDone.cardsPlayed || 0) >= 4) return;
+                  if (!c || !isMyTurn) return;
+                  if (c.type === "betrayer") return; // ทำงานอัตโนมัติ
                   if (c.type === "weapon") {
+                    // ตรวจสอบลิมิต 2 ชิ้น ฝั่ง client ก่อน
+                    if ((me?.equipment?.length || 0) >= 2) {
+                      setEquipSwapDialog({ newCard: c, currentEquip: me.equipment || [] });
+                      return;
+                    }
                     onGameAction("use_card", { cardUid: c.uid });
                     setSelectedCard(null); setActionMode(null);
                     return;
@@ -832,7 +863,9 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                   setActionMode(actionMode === "card" ? null : "card");
                 }}
               >
-                🃏 ใช้ "{selectedCard.name}" ({actionsDone.cardsPlayed || 0}/4)
+                {selectedCard.type === "betrayer"
+                  ? "🗡️ ตราทรยศ — รอสิ้นเฟส"
+                  : `🃏 ใช้ "${selectedCard.name}"`}
               </button>
             )}
           </div>
@@ -1140,7 +1173,12 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                 🔒 เควสนี้เป็นความลับ ผู้เล่นอื่นมองไม่เห็น
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px", marginTop: "14px" }}>
+            <button
+              onClick={() => { setStatusSel(myIdx); setShowStatus(true); setQuestStatusMode(true); }}
+              style={{ marginTop: "10px", width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(64,128,192,.15)", border: "1px solid rgba(64,128,192,.35)", color: "#80b0e0", fontSize: "11px", cursor: "pointer" }}>
+              📊 ดูสถานะตัวละครของฉัน
+            </button>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px", marginTop: "10px" }}>
               {me.questChoices.map(q => (
                 <div key={q.id}
                   onClick={() => pickQuest(q.id)}
@@ -1174,7 +1212,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
       {/* ═══ STATUS VIEW MODAL — ดูค่าสถานะ/อุปกรณ์ผู้เล่นทุกคน ═══ */}
       {showStatus && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: 310, display: "flex", alignItems: "center", justifyContent: "center", overflowY: "auto", padding: "16px" }}
-          onClick={() => setShowStatus(false)}>
+          onClick={() => { setShowStatus(false); setQuestStatusMode(false); }}>
           <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.35)", borderRadius: "16px", padding: "22px", maxWidth: "720px", width: "100%", maxHeight: "86vh", overflowY: "auto" }}
             onClick={e => e.stopPropagation()}>
             <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", marginBottom: "4px", fontSize: "16px", textAlign: "center" }}>📊 สถานะผู้เล่นทั้งหมด</h3>
@@ -1266,7 +1304,10 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
               );
             })()}
 
-            <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "14px" }} onClick={() => setShowStatus(false)}>✓ ปิด</button>
+            {questStatusMode
+              ? <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "14px" }} onClick={() => { setShowStatus(false); setQuestStatusMode(false); }}>← กลับไปเลือกเควส</button>
+              : <button className="tb-btn primary" style={{ width: "100%", padding: "10px", marginTop: "14px" }} onClick={() => setShowStatus(false)}>✓ ปิด</button>
+            }
           </div>
         </div>
       )}
@@ -1582,6 +1623,62 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
       )}
 
       <WinScreen gameOver={gameOver} onLeave={onLeave} />
+
+      {/* ═══ EQUIP SWAP DIALOG — อุปกรณ์เต็ม 2 ชิ้น เลือกถอดชิ้นเก่า ═══ */}
+      {equipSwapDialog && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.88)", zIndex: 350, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.4)", borderRadius: "16px", padding: "22px", maxWidth: "420px", width: "100%" }}>
+            <div style={{ textAlign: "center", marginBottom: "12px" }}>
+              <div style={{ fontSize: "34px" }}>🔄</div>
+              <h3 style={{ fontFamily: "'Cinzel',serif", color: "var(--gold)", margin: "4px 0" }}>เปลี่ยนอุปกรณ์</h3>
+              <div style={{ fontSize: "11px", color: "var(--txt-m)" }}>
+                สวมได้สูงสุด 2 ชิ้น — เลือกชิ้นที่ต้องการถอดออก
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: "8px", marginBottom: "14px" }}>
+              <div style={{ fontSize: "10px", color: "var(--gold)", marginBottom: "4px" }}>🆕 ต้องการสวม: {equipSwapDialog.newCard.ico} {equipSwapDialog.newCard.name}</div>
+              {equipSwapDialog.currentEquip.map((e, ei) => (
+                <div key={ei}
+                  onClick={() => {
+                    onGameAction("swap_equip", { removeEquipId: e.id, newCardUid: equipSwapDialog.newCard.uid });
+                    setEquipSwapDialog(null);
+                    setSelectedCard(null);
+                  }}
+                  style={{ background: "var(--s3)", border: "1px solid rgba(224,80,80,.35)", borderRadius: "10px", padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "10px" }}
+                  onMouseEnter={ev => ev.currentTarget.style.borderColor = "#e05050"}
+                  onMouseLeave={ev => ev.currentTarget.style.borderColor = "rgba(224,80,80,.35)"}>
+                  <span style={{ fontSize: "22px" }}>{e.ico}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: "12px", color: "var(--gold-l)", fontWeight: 600 }}>{e.name}</div>
+                    <div style={{ fontSize: "10px", color: "var(--txt-m)" }}>
+                      {e.atk > 0 && `⚔️+${e.atk} `}{e.def > 0 && `🛡️+${e.def} `}{e.range > 0 && `🎯${e.range}`}
+                    </div>
+                  </div>
+                  <span style={{ color: "#e05050", fontSize: "11px" }}>ถอด ✕</span>
+                </div>
+              ))}
+            </div>
+            <button className="tb-btn" style={{ width: "100%", padding: "9px" }} onClick={() => setEquipSwapDialog(null)}>ยกเลิก</button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ FLOATING NOTIFICATION TOASTS — สถานะ / บัฟ / กับดัก / เหตุการณ์ ═══ */}
+      {notifications.length > 0 && (
+        <div style={{ position: "fixed", top: "68px", right: "292px", zIndex: 500, display: "flex", flexDirection: "column", gap: "6px", pointerEvents: "none", maxWidth: "280px" }}>
+          {notifications.map(n => (
+            <div key={n.id} style={{
+              background: n.type === "death" ? "rgba(180,40,40,.96)" : n.type === "win" ? "rgba(40,160,40,.96)" : n.type === "heal" ? "rgba(30,100,180,.96)" : "rgba(20,18,28,.96)",
+              border: `1px solid ${n.type === "death" ? "#c04040" : n.type === "win" ? "#40c040" : n.type === "heal" ? "#4080c0" : "rgba(201,168,76,.45)"}`,
+              borderRadius: "10px", padding: "7px 11px", fontSize: "10px", color: "#f0ead8",
+              backdropFilter: "blur(6px)", lineHeight: 1.45,
+              animation: "notifSlideIn .25s ease",
+            }}>
+              {n.msg}
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

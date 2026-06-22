@@ -3,7 +3,7 @@
 //   RECOMPUTE_GS is the "current gs" used as a default arg by
 //   recomputeStats/addStatus/resolveAttack — safe because handlers run
 //   synchronously, one websocket message at a time.
-import { MAGIC_CARDS, drawWeighted, rarityMeta } from "../constants/cards.js";
+import { MAGIC_CARDS, drawWeighted, rarityMeta, BETRAYER_CARD } from "../constants/cards.js";
 import {
   gearResistance, isGearActive, hasMetalArmor, METAL_SLOTS,
   computeMagicTargets, applyAttackToTarget,
@@ -191,12 +191,28 @@ export function killPlayer(gs, p) {
   p.alive = false;
   p.revealed = true;
   pushLog(gs, `💀 ${p.name} (${p.role}) ถูกกำจัด! — บทบาทถูกเปิดเผย`, "death");
-  // เมื่อราชาตาย → เริ่ม traitor offer ก่อน checkWin (gs._code ถูกเซ็ตตอน start_game)
-  if (p.role === "king" && gs._code) {
-    startTraitorOffer(gs, gs._code);
-  } else {
-    checkWinServer(gs);
+  // เมื่อราชาตาย → ตรวจสอบผู้ทรยศที่ซ่อนอยู่ → เปิดเผยและเพิ่มพลัง ×2 เป็นเวลา 1 เฟส
+  if (p.role === "king") {
+    const betrayers = gs.players.filter(px => px.alive && px.role === "traitor");
+    if (betrayers.length > 0) {
+      gs.betrayerRevealEvent = { id: ++gs._eventSeq, phase: gs.phase, count: betrayers.length };
+      pushLog(gs, `🗡️ ราชาล้มแล้ว! ผู้ทรยศปรากฏตัว (${betrayers.length} คน) — พลังสองเท่าตลอด 1 เฟส!`, "event");
+      for (const b of betrayers) {
+        b._betrayerBuffPhase = gs.phase;
+        b.baseAtk  = Math.round(b.baseAtk  * 2);
+        b.baseDef  = Math.round(b.baseDef  * 2);
+        b.baseMove = Math.round(b.baseMove * 2);
+        b.maxHp    = Math.min(b.maxHp  * 2, 999);
+        b.hp       = Math.min(b.hp     * 2, b.maxHp);
+        b.maxMana  = Math.min(b.maxMana * 2, 999);
+        b.mana     = Math.min(b.mana   * 2, b.maxMana);
+        b.revealed = true;
+        recomputeStats(b, gs);
+        pushLog(gs, `🗡️ ${b.name} — ผู้ทรยศ! ATK/DEF/SPD ×2 เป็นเวลา 1 เฟส!`, "event");
+      }
+    }
   }
+  checkWinServer(gs);
 }
 
 // TERRAIN MOVEMENT + grid distance → server/hex.js
@@ -538,8 +554,16 @@ export function createInitialGameState(room) {
     _questTargets: zoneToCell,
     _code: room.code,            // ใช้ใน killPlayer สำหรับ startTraitorOffer
   };
+  // ─── แจกตราทรยศ 2 ใบให้ผู้เล่นสุ่ม (ไม่ใช่ราชา) ─────────────────────────────
+  //   ผู้ที่ถือไว้จนสิ้นเฟส → กลายเป็นผู้ทรยศโดยไม่มีใครรู้
+  const nonKings = players.filter(p => p.role !== "king");
+  shuffle([...nonKings]).slice(0, Math.min(2, nonKings.length)).forEach(p => {
+    p.hand.push({ ...BETRAYER_CARD, uid: makeUid() });
+  });
+
   setActiveGS(gs);
   pushLog(gs, "🏰 เกมเริ่มต้น! พระราชาเปิดตัวและเริ่มเล่นก่อน", "event");
+  pushLog(gs, "🗡️ ตราทรยศถูกแจกให้ผู้เล่นที่ซ่อนอยู่ในเงามืด... (เฉพาะผู้ถือเห็นในมือตัวเอง)", "event");
   if (kingBuffPct > 0) pushLog(gs, `👑 ผู้เล่น ${totalPlayers} คน — พระราชาได้รับพรราชวงศ์ ค่าสถานะ +${Math.round(kingBuffPct * 100)}%`, "event");
   pushLog(gs, `👑 ${players[turnOrder[0]]?.name} (พระราชา) เริ่มเทิร์นแรก`, "turn");
   beginTurn(gs, true);
@@ -987,6 +1011,37 @@ export function advancePointer(gs) {
 // ─── PHASE ADVANCE ───────────────────────────────────────────────────────────
 export function onPhaseAdvance(gs) {
   setActiveGS(gs);
+
+  // ── หมดเวลาบัฟทรยศ (×2 พลัง เป็นเวลา 1 เฟส) ──────────────────────────────
+  for (const p of gs.players) {
+    if (p._betrayerBuffPhase != null && gs.phase > p._betrayerBuffPhase) {
+      p.baseAtk  = Math.max(1, Math.round(p.baseAtk  / 2));
+      p.baseDef  = Math.max(0, Math.round(p.baseDef  / 2));
+      p.baseMove = Math.max(1, Math.round(p.baseMove / 2));
+      p.maxHp    = Math.max(1, Math.round(p.maxHp  / 2));
+      p.hp       = Math.min(p.hp, p.maxHp);
+      p.maxMana  = Math.max(0, Math.round(p.maxMana / 2));
+      p.mana     = Math.min(p.mana, p.maxMana);
+      p._betrayerBuffPhase = null;
+      recomputeStats(p, gs);
+      pushLog(gs, `🗡️ ${p.name} — พลังทรยศหมดลง (กลับสู่ค่าปกติ)`, "event");
+    }
+  }
+
+  // ── ตรวจสอบตราทรยศ: ผู้ถือจนสิ้นเฟส → กลายเป็นผู้ทรยศ ────────────────────
+  for (const p of gs.players) {
+    if (!p.alive) continue;
+    const betIdx = (p.hand || []).findIndex(c => c.type === "betrayer");
+    if (betIdx < 0) continue;
+    // ราชาถือ → ไม่มีผล
+    if (p.role === "king") continue;
+    // กลายเป็นทรยศ + ลบตรา
+    p.role = "traitor";
+    p.revealed = false;
+    p.hand.splice(betIdx, 1);
+    pushLog(gs, `🗡️ ผู้ถือตราทรยศในเฟสนี้กลายเป็นผู้ทรยศในเงามืด... (ตัวตนยังคงลับ)`, "event");
+  }
+
   gs.phase += 1;
 
   // เกินจำนวนเฟส → โหมดบอส
@@ -1251,7 +1306,6 @@ export function bossTurn(gs) {
 // ─── Win Check ──────────────────────────────────────────────────────────────
 export function checkWinServer(gs) {
   if (gs.gameOver) return;
-  if (gs.traitorOfferPending) return; // รอผู้เล่นตัดสินใจก่อน
 
   const alive = gs.players.filter(p => p.alive);
   const king = gs.players.find(p => p.role === "king");
@@ -1287,7 +1341,7 @@ export function checkWinServer(gs) {
         return;
       }
     } else {
-      // ไม่มีทรยศ — กบฏชนะเมื่อราชาตาย (ราษฎรแพ้ไปแล้วตอน resolveTraitorOffer)
+      // ไม่มีทรยศ — กบฏชนะเมื่อราชาตาย
       if (rebels.some(r => r.alive)) {
         gs.gameOver = { winner: "rebel", reason: "กบฏโค่นบัลลังก์! 🏴", players: rebels.filter(r => r.alive) };
         pushLog(gs, `🏆 กบฏชนะ! โค่นบัลลังก์สำเร็จ!`, "win");

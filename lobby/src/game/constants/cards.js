@@ -313,6 +313,17 @@ export const TRAP_CARDS = [
 export const ALL_CARDS = [...WEAPON_CARDS, ...MAGIC_CARDS, ...TRAP_CARDS];
 export const CARD_BY_ID = Object.fromEntries(ALL_CARDS.map(c => [c.id, c]));
 
+// ─── ตราทรยศ — ใส่ในเด็คเริ่มเกม 2 ใบ (ไม่อยู่ใน ALL_CARDS / pool ปกติ) ──
+// ถือจนสิ้นเฟส → กลายเป็นผู้ทรยศ · ราชาถือแล้วไม่มีผล
+export const BETRAYER_CARD = {
+  id: "betrayer_mark",
+  type: "betrayer",
+  name: "ตราทรยศ",
+  ico: "🗡️",
+  rarity: "mythic",
+  desc: "ถือไว้จนสิ้นเฟส → กลายเป็นผู้ทรยศ · ราชาถือแล้วไม่มีผล · ทิ้ง/ถูกขโมย = ไม่เกิดอะไร",
+};
+
 // ─── การจั่วแบบถ่วงน้ำหนักตามความหายาก ───────────────────────────────────────
 //   1) สุ่มเลือก "ระดับความหายาก" ตามน้ำหนัก (เฉพาะระดับที่มีการ์ดอยู่ใน pool)
 //   2) สุ่มการ์ด 1 ใบจากระดับนั้น → ทำให้ % การจั่วตรงตามที่กำหนดไว้
