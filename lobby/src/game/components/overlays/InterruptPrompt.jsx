@@ -21,7 +21,9 @@ export default function InterruptPrompt({ interrupt, myIdx, myHand = [], onRespo
         <div className="intr-sub">
           <span className="intr-cardico">{card.ico}</span>
           <b>{card.name}</b> จาก {interrupt.casterName}
-          {card.dmg ? <span className="intr-dmg"> · {card.dmg} ดาเมจ</span> : null}
+        </div>
+        <div className="intr-effect">
+          ⚠ ผลที่จะเกิดกับคุณ: <b>{card.effectText || (card.dmg ? `${card.dmg} ดาเมจ` : "—")}</b>
         </div>
         <div className="intr-actions">
           {entry.canDodge && dodgeCard && (

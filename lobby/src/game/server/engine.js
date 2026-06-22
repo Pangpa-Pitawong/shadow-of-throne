@@ -833,7 +833,7 @@ export function checkQuestProgress(player, cell, gs) {
   }
 }
 // รางวัลเควส = เพิ่มค่า "สูงสุด" ของสถานะต่างๆ (ถาวร) + เงิน
-export function grantQuestReward(player, reward, gs) {
+export function grantQuestReward(player, reward) {
   if (!reward) return;
   if (reward.gold) player.gold += reward.gold;
   // เพิ่มเพดานสถานะ (ถาวร) แล้วเติมส่วนที่เพิ่มขึ้นให้ทันที
@@ -1368,6 +1368,25 @@ export function checkWinServer(gs) {
 //   เลือก "หลบ (ลมเวทย์หลบภัย)" / "บล็อก (พลังเวทย์พื้นฐาน)" หรือ "รับการโจมตี"
 const INTERRUPT_TIMEOUT_MS = 15000;
 
+// ── สรุปผลการ์ดแบบสั้น (โชว์ในกล่องแจ้งเตือนก่อน execute) ──────────────────────
+// คืนข้อความ 1 บรรทัด อ่านง่าย — ใช้กับ pendingInterrupt / actionNotice
+const STATUS_LABEL_TH = {
+  stun: "มึน", trip: "สะดุด", slow: "ช้า", curse: "สาป", burn: "ลุกไหม้",
+  freeze: "แช่แข็ง", poison: "พิษ", blind: "ตาบอด", silence: "ปิดเวทย์",
+  atk_down: "พลังโจมตีลด", armor_break: "เกราะแตก",
+};
+export function cardEffectSummary(card = {}) {
+  const parts = [];
+  if (card.dmg) parts.push(`${card.dmg} ดาเมจ`);
+  if (card.effect && STATUS_LABEL_TH[card.effect]) {
+    parts.push(`${STATUS_LABEL_TH[card.effect]}${card.dur ? ` ${card.dur} เทิร์น` : ""}`);
+  }
+  if (card.lifedrain) parts.push("ดูด HP");
+  if (card.effect === "mana_drain") parts.push(`ดูดมานา ${card.val || 1}`);
+  if (card.pierce) parts.push("ทะลุเกราะ");
+  return parts.length ? parts.join(" + ") : "ไม่มีผลโดยตรง";
+}
+
 export function startAttackCard(gs, code, ws, cp, card, cardIdx, { targetPlayer, targetCell }) {
   const cost = card.cost || 0;
   if (cp.mana < cost) return send(ws, { type: "error", msg: "มานาไม่พอ" });
@@ -1406,7 +1425,7 @@ export function startAttackCard(gs, code, ws, cp, card, cardIdx, { targetPlayer,
 
   gs.pendingInterrupt = {
     id: ++gs._eventSeq, casterId: cp.id, casterName: cp.name,
-    card: { id: card.id, name: card.name, ico: card.ico, dmg: card.dmg, element: card.element, effect: card.effect, dur: card.dur, val: card.val, lifedrain: card.lifedrain, target: card.target, aoeMode: card.aoeMode, range: card.range, byTile: card.byTile, blockable: card.blockable, dodgeable: card.dodgeable },
+    card: { id: card.id, name: card.name, ico: card.ico, dmg: card.dmg, element: card.element, effect: card.effect, dur: card.dur, val: card.val, lifedrain: card.lifedrain, target: card.target, aoeMode: card.aoeMode, range: card.range, byTile: card.byTile, blockable: card.blockable, dodgeable: card.dodgeable, effectText: cardEffectSummary(card) },
     targetCell: targetCell ? { col: targetCell.col, row: targetCell.row } : null,
     entries,
   };
@@ -1417,7 +1436,7 @@ export function startAttackCard(gs, code, ws, cp, card, cardIdx, { targetPlayer,
   gs._interruptTimer = setTimeout(() => autoResolveInterrupt(code, iid), INTERRUPT_TIMEOUT_MS);
 }
 
-export function resolveAttackCard(gs, code, caster, card, { targetCell }, entries) {
+export function resolveAttackCard(gs, code, caster, card, _opts, entries) {
   setActiveGS(gs);
   for (const e of entries) {
     const t = gs.players[e.id];
