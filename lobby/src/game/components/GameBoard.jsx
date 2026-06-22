@@ -1211,7 +1211,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
 
       {/* ═══ STATUS VIEW MODAL — ดูค่าสถานะ/อุปกรณ์ผู้เล่นทุกคน ═══ */}
       {showStatus && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: 310, display: "flex", alignItems: "center", justifyContent: "center", overflowY: "auto", padding: "16px" }}
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: questStatusMode ? 330 : 310, display: "flex", alignItems: "center", justifyContent: "center", overflowY: "auto", padding: "16px" }}
           onClick={() => { setShowStatus(false); setQuestStatusMode(false); }}>
           <div style={{ background: "var(--s2)", border: "1px solid rgba(201,168,76,.35)", borderRadius: "16px", padding: "22px", maxWidth: "720px", width: "100%", maxHeight: "86vh", overflowY: "auto" }}
             onClick={e => e.stopPropagation()}>
