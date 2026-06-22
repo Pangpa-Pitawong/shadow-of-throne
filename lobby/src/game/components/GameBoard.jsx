@@ -156,6 +156,10 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
     try { return localStorage.getItem("sot_statbar") !== "0"; } catch { return true; }
   });
   useEffect(() => { try { localStorage.setItem("sot_statbar", statbarOpen ? "1" : "0"); } catch { /* ignore */ } }, [statbarOpen]);
+  const [rosterOpen, setRosterOpen] = useState(() => { // แถบเลือด/สถานะผู้เล่นอื่น (มุมซ้ายบน) ย่อ/ขยาย (จำค่า)
+    try { return localStorage.getItem("sot_roster") !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem("sot_roster", rosterOpen ? "1" : "0"); } catch { /* ignore */ } }, [rosterOpen]);
   const [drawReveal, setDrawReveal] = useState(null); // { cards, flipped[] } — เปิดไพ่ที่จั่วได้
   const [drawSeen, setDrawSeen] = useState(false);     // เปิดไพ่ของเทิร์นนี้ดูแล้วหรือยัง
   const lastDrawKeyRef = useRef("");
@@ -764,6 +768,53 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
               </div>
             </div>
           )}
+
+          {/* roster: แถบเลือด/สถานะผู้เล่นอื่นๆ (มุมซ้ายบน ใต้ crest) — ย่อ/ขยายได้ */}
+          {players.length > 1 && (() => {
+            const others = players.map((p, i) => ({ p, i })).filter(({ i }) => i !== myIdx);
+            if (!others.length) return null;
+            return (
+              <div className={`hud-roster ${rosterOpen ? "open" : "collapsed"}`}>
+                <div className="hud-roster-hd" onClick={() => setRosterOpen(v => !v)}
+                  title={rosterOpen ? "ย่อแถบผู้เล่น" : "ขยายแถบผู้เล่น"}>
+                  <span className="hr-title">👥 ผู้เล่นอื่น</span>
+                  <span className="hr-count">{others.filter(({ p }) => p.alive).length}/{others.length}</span>
+                  <span className="hr-x">{rosterOpen ? "▾" : "▸"}</span>
+                </div>
+                {rosterOpen && (
+                  <div className="hud-roster-body">
+                    {others.map(({ p, i }) => {
+                      const hpPct = Math.max(0, Math.min(100, p.maxHp ? (p.hp / p.maxHp) * 100 : 0));
+                      const hpClass = hpPct > 50 ? "hi" : hpPct > 25 ? "mid" : "lo";
+                      return (
+                        <div key={i} className={`hr-row ${currentTurn === i ? "active" : ""} ${!p.alive ? "dead" : ""}`}
+                          onClick={() => { setStatusSel(i); setShowStatus(true); }}
+                          title={`ดูสถานะ ${p.name}`}>
+                          <span className="hr-ava">{p.alive ? <CharIcon ch={CHARACTERS[p.charId]} size={28} /> : "💀"}</span>
+                          <div className="hr-mid">
+                            <div className="hr-name-row">
+                              <span className="hr-no">{i + 1}</span>
+                              <span className="hr-name">{p.name}</span>
+                              {currentTurn === i && <span className="hr-turn" title="กำลังเดิน">▶</span>}
+                            </div>
+                            <div className="hr-hpbar" title={`HP ${p.hp}/${p.maxHp}`}>
+                              <div className={`hr-hpfill ${hpClass}`} style={{ width: `${hpPct}%` }} />
+                              <span className="hr-hptxt">{p.hp}/{p.maxHp}</span>
+                            </div>
+                          </div>
+                          <div className="hr-stats">
+                            <span title="พลังโจมตี">⚔️{p.atk ?? 0}</span>
+                            <span title="ป้องกัน">🛡️{p.def ?? 0}</span>
+                            <span title="มานา">💧{p.mana ?? 0}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* shields: ผู้เล่นทุกคน (คลิกเพื่อดูสถานะ) */}
           <div className="hud-shields">
