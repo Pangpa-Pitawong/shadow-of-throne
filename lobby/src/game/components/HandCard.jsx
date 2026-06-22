@@ -4,11 +4,19 @@
 import { RARITY, normRarity } from "../constants/cards.js";
 
 // ป้ายประเภทการ์ด (badge) — โทนเข้ม/ทอง ตามธีม dark fantasy
+// key = card.cat (หมวดจริง) → fallback card.type
 const TYPE_BADGE = {
-  weapon:   { label: "ยุทธภัณฑ์", cls: "bdg-weapon" },
-  magic:    { label: "กลศึก",     cls: "bdg-magic" },
-  trap:     { label: "อุบาย",     cls: "bdg-trap" },
-  betrayer: { label: "ตราทรยศ",   cls: "bdg-betrayer" },
+  attack:      { label: "โจมตี",   cls: "bdg-attack" },
+  defense:     { label: "ป้องกัน", cls: "bdg-defense" },
+  political:   { label: "การเมือง", cls: "bdg-political" },
+  equipment:   { label: "อุปกรณ์", cls: "bdg-weapon" },
+  battlefield: { label: "สนามรบ",  cls: "bdg-battlefield" },
+  legendary:   { label: "ตำนาน",   cls: "bdg-legendary" },
+  betrayer:    { label: "ตราทรยศ", cls: "bdg-betrayer" },
+  // fallback ชื่อ type เดิม
+  weapon:      { label: "อุปกรณ์", cls: "bdg-weapon" },
+  magic:       { label: "กลศึก",   cls: "bdg-magic" },
+  trap:        { label: "อุบาย",   cls: "bdg-trap" },
 };
 
 const ELEMENT_ICO = {
@@ -34,7 +42,7 @@ const DESC_PREVIEW_LIMIT = 52;
 export default function HandCard({ card, isSelected, isMyTurn, onSelect, onDetail }) {
   const rarity = normRarity(card.rarity);
   const meta = RARITY[rarity];
-  const badge = TYPE_BADGE[card.type] || { label: "การ์ด", cls: "bdg-weapon" };
+  const badge = TYPE_BADGE[card.cat] || TYPE_BADGE[card.type] || { label: "การ์ด", cls: "bdg-weapon" };
   const cond = condLabel(card.cond);
   const elIco = card.element ? ELEMENT_ICO[card.element] : (card.atkElement ? ELEMENT_ICO[card.atkElement] : "");
   const desc = card.desc || "";
@@ -55,7 +63,7 @@ export default function HandCard({ card, isSelected, isMyTurn, onSelect, onDetai
 
   return (
     <div
-      className={`hand-card ${isSelected ? "selected" : ""} type-${card.type}`}
+      className={`hand-card ${isSelected ? "selected" : ""} type-${card.type} rar-${rarity} cat-${card.cat || card.type}`}
       onClick={() => isMyTurn && onSelect(isSelected ? null : card)}
     >
       <div className="card-top">

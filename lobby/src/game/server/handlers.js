@@ -15,7 +15,7 @@ import {
   killPlayer, pushLog, giveCard, enforceHandLimit, resolveAttack,
   beginTurn, advancePointer, onPhaseAdvance, bossTurn,
   checkQuestProgress, applyZoneEffectServer, applyRandomZoneEvent,
-  startAttackCard, resolveAttackCard, CARD_CTX,
+  startAttackCard, resolveAttackCard, applyPlayableCard, CARD_CTX,
 } from "./engine.js";
 
 // ─── Game Action Handler ─────────────────────────────────────────────────────
@@ -294,6 +294,8 @@ export function handleGameAction(ws, msg) {
         }
       } else if (card.type === "betrayer") {
         return send(ws, { type: "error", msg: "ตราทรยศจะทำงานอัตโนมัติเมื่อสิ้นเฟส — ไม่สามารถใช้งานได้โดยตรง" });
+      } else if (card.type === "political" || card.type === "battlefield" || card.type === "legendary") {
+        result = applyPlayableCard(gs, info.code, cp, card, { targetPlayer });
       } else if (card.type === "trap") {
         if (!targetCell) return send(ws, { type: "error", msg: "เลือกช่องวางกับดัก" });
         // วางได้เฉพาะช่องที่ยืน + รอบตัวระยะ 1 ช่อง

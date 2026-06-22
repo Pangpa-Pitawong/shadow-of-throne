@@ -847,7 +847,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                   }
                   if (c.type === "trap") { setActionMode(actionMode === "trap" ? null : "trap"); return; }
                   const t = c.target || "enemy";
-                  if (t === "self" || t === "team" || t === "none") {
+                  if (t === "self" || t === "team" || t === "none" || t === "highest") {
                     onGameAction("use_card", { cardUid: c.uid });
                     setSelectedCard(null); setActionMode(null);
                     return;
@@ -1019,8 +1019,10 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
               <span className="carddetail-ico">{cardDetail.ico}</span>
               <div>
                 <div className="carddetail-nm">{cardDetail.name}</div>
-                <span className={`card-badge bdg-${cardDetail.type}`}>
-                  {{ weapon: "ยุทธภัณฑ์", magic: "กลศึก", trap: "อุบาย", betrayer: "ตราทรยศ" }[cardDetail.type] || "การ์ด"}
+                <span className={`card-badge bdg-${cardDetail.cat || cardDetail.type}`}>
+                  {{ attack: "โจมตี", defense: "ป้องกัน", political: "การเมือง", equipment: "อุปกรณ์",
+                     battlefield: "สนามรบ", legendary: "ตำนาน", betrayer: "ตราทรยศ",
+                     weapon: "อุปกรณ์", magic: "กลศึก", trap: "อุบาย" }[cardDetail.cat || cardDetail.type] || "การ์ด"}
                 </span>
               </div>
             </div>

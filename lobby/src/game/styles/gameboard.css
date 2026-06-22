@@ -380,6 +380,11 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 .bdg-magic{background:rgba(96,128,200,.2);color:#9bb4e6;box-shadow:inset 0 0 0 1px rgba(96,128,200,.55)}
 .bdg-trap{background:rgba(150,96,180,.2);color:#d29bf0;box-shadow:inset 0 0 0 1px rgba(150,96,180,.55)}
 .bdg-betrayer{background:rgba(178,43,32,.26);color:#ff9a86;box-shadow:inset 0 0 0 1px rgba(178,43,32,.6)}
+.bdg-attack{background:rgba(178,43,32,.2);color:#ff9a86;box-shadow:inset 0 0 0 1px rgba(178,43,32,.5)}
+.bdg-defense{background:rgba(46,139,87,.2);color:#7fe0a8;box-shadow:inset 0 0 0 1px rgba(46,139,87,.55)}
+.bdg-political{background:rgba(96,128,200,.2);color:#9bb4e6;box-shadow:inset 0 0 0 1px rgba(96,128,200,.55)}
+.bdg-battlefield{background:rgba(150,96,180,.2);color:#d29bf0;box-shadow:inset 0 0 0 1px rgba(150,96,180,.55)}
+.bdg-legendary{background:rgba(201,168,76,.26);color:#ffd54a;box-shadow:inset 0 0 0 1px rgba(201,168,76,.65)}
 .rail-list .hand-card .card-rarity{position:static;font-size:9px}
 .rail-list .hand-card .card-head{display:flex;align-items:center;gap:7px}
 .rail-list .hand-card .card-ico{flex:0 0 auto;font-size:20px;margin:0;display:block;
@@ -402,6 +407,22 @@ body{font-family:'Sarabun',sans-serif;font-size:13px;color:var(--txt)}
 .rail-list .hand-card.selected{transform:translateX(-8px);z-index:41;border-color:var(--vermillion);
   background:linear-gradient(170deg,#2a2012,#161009);
   box-shadow:-8px 10px 26px rgba(0,0,0,.6),0 0 18px rgba(178,43,32,.5)}
+
+/* แถบสีหมวด (ขอบซ้าย) — รู้ประเภทแว่บเดียว */
+.rail-list .hand-card{position:relative}
+.rail-list .hand-card::after{content:'';position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;opacity:.9}
+.rail-list .hand-card.cat-attack::after{background:#b22b20}
+.rail-list .hand-card.cat-defense::after{background:#2e8b57}
+.rail-list .hand-card.cat-political::after{background:#6080c8}
+.rail-list .hand-card.cat-equipment::after,.rail-list .hand-card.cat-weapon::after{background:#c9a84c}
+.rail-list .hand-card.cat-battlefield::after{background:#9660b4}
+.rail-list .hand-card.cat-legendary::after{background:#ffd54a}
+.rail-list .hand-card.cat-betrayer::after{background:#b22b20}
+/* ความหายาก — ลี้ลับ/สมบัติสวรรค์ ขอบทองเข้ม + เรืองแสงบาง ดูพรีเมียม */
+.rail-list .hand-card.rar-mythic{border-color:rgba(196,137,255,.5)}
+.rail-list .hand-card.rar-divine{border-color:rgba(255,213,74,.6);
+  box-shadow:inset 0 0 12px rgba(255,213,74,.12),0 2px 8px rgba(0,0,0,.5)}
+.rail-list .hand-card.rar-divine .card-nm{color:#ffe39a}
 
 /* ── CARD DETAIL MODAL — คำอธิบายเต็ม (เปิดจากปุ่ม "รายละเอียด") ── */
 .carddetail-backdrop{position:fixed;inset:0;background:rgba(4,3,2,.72);z-index:600;

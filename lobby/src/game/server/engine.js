@@ -3,7 +3,7 @@
 //   RECOMPUTE_GS is the "current gs" used as a default arg by
 //   recomputeStats/addStatus/resolveAttack — safe because handlers run
 //   synchronously, one websocket message at a time.
-import { MAGIC_CARDS, drawWeighted, rarityMeta, BETRAYER_CARD } from "../constants/cards.js";
+import { MAGIC_CARDS, drawWeighted, rarityMeta, BETRAYER_CARD, buildDeckTemplates } from "../constants/cards.js";
 import {
   gearResistance, isGearActive, hasMetalArmor, METAL_SLOTS,
   computeMagicTargets, applyAttackToTarget,
@@ -23,14 +23,23 @@ import {
 } from "./constants.js";
 import { send, broadcastGameState } from "./net.js";
 
-// โอกาสที่การ์ดที่จั่ว "เริ่มเทิร์น" ของผู้เล่นที่ยังไม่ใช่ราชา/ผู้ทรยศ จะกลายเป็น
-// ตราทรยศ (จำกัดด้วย gs._betrayersLeft) — ทำให้ตราทรยศปนในกองจั่วแบบลุ้น
-const BETRAYER_DRAW_CHANCE = 0.06;
-
-// จั่วการ์ดแบบถ่วงน้ำหนักตามความหายาก (% การจั่วตรงตามที่กำหนดใน RARITY)
+// จั่วการ์ดแบบถ่วงน้ำหนักตามความหายาก — ใช้กับ "ร้านค้า/เหตุการณ์" (pool ย่อย)
 export function drawRandomCard(pool = ALL_CARDS_POOL) {
   const card = drawWeighted(pool, Math.random);
   return { ...card, uid: makeUid() };
+}
+
+// ─── FINITE DECK: เด็คจริง 100 ใบ + ตราทรยศที่สับเข้ามา ───────────────────────
+//   ผู้เล่นจั่วเริ่มเทิร์นจากเด็คนี้ (ดู beginTurn) → ได้สัดส่วน 30/20/20/10/10/10
+//   เด็คหมด → สร้างชุดใหม่ (ไม่ใส่ตราทรยศซ้ำ) แล้วสับใหม่
+export function buildDeck(betrayerCount = 0) {
+  const deck = buildDeckTemplates().map(c => ({ ...c, uid: makeUid() }));
+  for (let i = 0; i < betrayerCount; i++) deck.push({ ...BETRAYER_CARD, uid: makeUid() });
+  return shuffle(deck);
+}
+export function drawFromDeck(gs) {
+  if (!gs._deck || gs._deck.length === 0) gs._deck = buildDeck(0);
+  return gs._deck.pop();
 }
 
 // ─── HAND LIMIT: ถือไพ่ได้ไม่เกิน HP ปัจจุบัน (สูงสุด 10 ใบ) ────────────────
@@ -558,11 +567,10 @@ export function createInitialGameState(room) {
     _questTargets: zoneToCell,
     _code: room.code,            // ใช้ใน killPlayer สำหรับ startTraitorOffer
   };
-  // ─── ตราทรยศ: ผสมเข้ากองจั่วปกติ (ไม่แจกตั้งต้น) ───────────────────────────
-  //   จำนวนคงที่ = คุมความน่าจะเป็น · ผู้เล่น (ไม่ใช่ราชา) อาจ "จั่วโดน" เมื่อใดก็ได้
-  //   โดยไม่มีใครรู้ล่วงหน้า — ดู beginTurn (BETRAYER_DRAW_CHANCE)
+  // ─── เด็คจริง 100 ใบ + ตราทรยศสับเข้ามา (ไม่แจกตั้งต้น) ────────────────────
+  //   ผู้เล่นจั่วโดนตราทรยศเมื่อใดก็ได้โดยไม่รู้ล่วงหน้า — คุมจำนวน = คุมโอกาส
   const nonKings = players.filter(p => p.role !== "king");
-  gs._betrayersLeft = Math.min(2, nonKings.length);
+  gs._deck = buildDeck(Math.min(2, nonKings.length));
 
   setActiveGS(gs);
   pushLog(gs, "🏰 เกมเริ่มต้น! พระราชาเปิดตัวและเริ่มเล่นก่อน", "event");
@@ -994,17 +1002,7 @@ export function beginTurn(gs, isFirst = false, guard = 0) {
   // กับดักไฟแผดการ์ด — เผาการ์ดที่จะจั่ว
   if (p._burnDraw > 0 && drawN > 0) { const burn = Math.min(p._burnDraw, drawN); drawN -= burn; p._burnDraw -= burn; if (burn > 0) pushLog(gs, `🔥 ${p.name} การ์ด ${burn} ใบถูกเผาก่อนจั่ว`, "dmg"); }
   const drew = [];
-  for (let i = 0; i < Math.max(0, drawN); i++) {
-    // ตราทรยศปนในกองจั่ว: ผู้เล่นที่ไม่ใช่ราชา/ผู้ทรยศ และยังไม่ถือตราทรยศ มีโอกาสจั่วโดน
-    const canBetray = (gs._betrayersLeft || 0) > 0 && p.role !== "king" && p.role !== "traitor"
-      && !p.hand.some(c => c.type === "betrayer") && !drew.some(c => c.type === "betrayer");
-    if (canBetray && Math.random() < BETRAYER_DRAW_CHANCE) {
-      gs._betrayersLeft--;
-      drew.push({ ...BETRAYER_CARD, uid: makeUid() });
-    } else {
-      drew.push(drawRandomCard());
-    }
-  }
+  for (let i = 0; i < Math.max(0, drawN); i++) { const c = drawFromDeck(gs); if (c) drew.push(c); }
   p.justDrew = drew.map(c => c.uid);   // client ใช้สำหรับแอนิเมชันเปิดไพ่
   for (const c of drew) p.hand.push(c);
   if (drew.length) pushLog(gs, `🎴 ${p.name} จั่วการ์ดเริ่มเทิร์น ${drew.length} ใบ`, "");
@@ -1380,6 +1378,66 @@ export function checkWinServer(gs) {
 //   เมื่อมีผู้ใช้การ์ดโจมตีที่ dodgeable/blockable → หยุดรอให้เป้าหมายแต่ละคน
 //   เลือก "หลบ (ลมเวทย์หลบภัย)" / "บล็อก (พลังเวทย์พื้นฐาน)" หรือ "รับการโจมตี"
 const INTERRUPT_TIMEOUT_MS = 15000;
+
+// ─── การ์ดเล่นได้: การเมือง / ตำนาน / สนามรบ (server resolve + แจ้งเตือน) ──────
+//   คืน {error} = ปฏิเสธ (ไม่ทิ้งการ์ด) · คืน {} = สำเร็จ
+export function applyPlayableCard(gs, code, cp, card, { targetPlayer }) {
+  setActiveGS(gs);
+  const alive = () => gs.players.filter(p => p.alive);
+  const byHp = (most) => { const a = alive(); if (!a.length) return null;
+    return a.reduce((x, y) => (most ? (y.hp > x.hp ? y : x) : (y.hp < x.hp ? y : x))); };
+  const discardRandom = (pl, n) => { for (let i = 0; i < n && pl.hand.length; i++) {
+    const c = pl.hand.splice(Math.floor(Math.random() * pl.hand.length), 1)[0]; gs._discard.push(c); } };
+  const dmgKill = (pl, amt) => { applyDamage(gs, pl, amt, card.name); if (pl.hp <= 0) killPlayer(gs, pl); };
+
+  // เงื่อนไขการใช้ (ตำนาน)
+  const cd = card.cond || {};
+  if (cd.hpBelowPct && cp.hp > cp.maxHp * cd.hpBelowPct / 100) return { error: `ใช้ได้เมื่อ HP < ${cd.hpBelowPct}%` };
+  if (cd.hpAtMost != null && cp.hp > cd.hpAtMost) return { error: `ใช้ได้เมื่อ HP ≤ ${cd.hpAtMost}` };
+  if (cd.handAtLeast && cp.hand.length < cd.handAtLeast) return { error: `ต้องมีการ์ดในมือ ≥ ${cd.handAtLeast} ใบ` };
+
+  // หาเป้าหมาย
+  let tgt = targetPlayer;
+  if (card.target === "highest") tgt = byHp(true);
+  const needTarget = card.target === "enemy" || card.target === "ally";
+  if (needTarget) {
+    if (!tgt || !tgt.alive) return { error: "ต้องเลือกเป้าหมาย" };
+    if (card.target === "enemy" && tgt.id === cp.id) return { error: "เลือกเป้าหมายที่ไม่ใช่ตัวเอง" };
+  }
+  // แจ้งเตือน (Phase 3): การ์ดที่กระทบผู้อื่น → log ก่อน execute
+  if (tgt && tgt.id !== cp.id) pushLog(gs, `⚠️ ${cp.name} ใช้ "${card.name}" ใส่ ${tgt.name}`, "event");
+  else pushLog(gs, `🎴 ${cp.name} ใช้ "${card.name}"`, "event");
+
+  switch (card.effect) {
+    // ── สนามรบ → ใช้กลไกการ์ดเหตุการณ์ (ส่งผลทุกคน) ──
+    case "bf": applyEventCard(gs, card); break;
+
+    // ── การเมือง ──
+    case "pol_proxy_kill": dmgKill(tgt, 1); pushLog(gs, `🗡️ ${tgt.name} ถูกยืมดาบ — เสีย HP 1`, "dmg"); break;
+    case "pol_break_alliance": { const lead = byHp(true); if (lead) { discardRandom(lead, 1); pushLog(gs, `💔 พันธมิตรแตก — ${lead.name} ทิ้งการ์ด 1 ใบ`, "event"); } break; }
+    case "pol_fake_letter": discardRandom(tgt, 1); pushLog(gs, `✉️ ${tgt.name} หลงสาส์นปลอม — ทิ้งการ์ด 1 ใบ`, "event"); break;
+    case "pol_bribe": { const c = drawFromDeck(gs); if (c) { tgt.hand.push(c); enforceHandLimit(tgt); } pushLog(gs, `🪙 ${cp.name} ซื้อใจ ${tgt.name} (มอบการ์ด 1 ใบ)`, "event"); break; }
+    case "pol_incite": { const eq = (tgt.equipment || [])[0];
+      if (eq) { tgt.equipment.splice(0, 1); recomputeStats(tgt, gs); pushLog(gs, `📢 ${tgt.name} ถูกปลุกระดม — เสียอุปกรณ์ "${eq.name}"`, "dmg"); }
+      else { dmgKill(tgt, 2); pushLog(gs, `📢 ${tgt.name} ถูกปลุกระดม — เสีย HP 2`, "dmg"); } break; }
+
+    // ── ตำนาน ──
+    case "leg_borrow_arrows": { const n = Math.min(6, cp.maxHp - cp.hp); for (let i = 0; i < n; i++) { const c = drawFromDeck(gs); if (c) cp.hand.push(c); } enforceHandLimit(cp); pushLog(gs, `🛶 ${cp.name} ยืมเกาทัณฑ์ — จั่ว ${n} ใบ`, "event"); break; }
+    case "leg_empty_fort": addStatus(cp, "shield", 1, 99, gs); for (let i = 0; i < 2; i++) { const c = drawFromDeck(gs); if (c) cp.hand.push(c); } enforceHandLimit(cp); pushLog(gs, `🏯 ${cp.name} แผนเมืองว่าง — ป้องกัน 1 รอบ + จั่ว 2 ใบ`, "event"); break;
+    case "leg_burn": dmgKill(tgt, Math.ceil(tgt.hp / 2)); discardRandom(tgt, 2); discardRandom(cp, 2); pushLog(gs, `🔥 ${tgt.name} ถูกเพลิงเผาผาแดง — HP ครึ่ง + ทิ้ง 2 ใบ`, "dmg"); break;
+    case "leg_seven_capture": { const eq = (tgt.equipment || [])[0]; if (eq) { tgt.equipment.splice(0, 1); recomputeStats(tgt, gs); gs._discard.push(eq); } discardRandom(cp, 2); pushLog(gs, `⛓️ ${cp.name} เจ็ดจับเจ็ดปล่อย — ยึดอุปกรณ์ ${tgt.name}`, "event"); break; }
+    case "leg_extend_life": cp.hp = Math.min(cp.maxHp, Math.floor(cp.maxHp / 2)); pushLog(gs, `🕯️ ${cp.name} ขงเบ้งยืดอายุ — ฟื้น HP เป็น ${cp.hp}`, "heal"); break;
+    case "leg_three_split": for (const x of alive()) { const c = drawFromDeck(gs); if (c) { x.hand.push(c); } const c2 = drawFromDeck(gs); if (c2) x.hand.push(c2); enforceHandLimit(x); } pushLog(gs, `💥 สามก๊กแตก — ทุกคนจั่ว 2 ใบ`, "event"); break;
+    case "leg_siege": addStatus(tgt, "slow", 1, 0, gs); addStatus(tgt, "atk_down", 1, 2, gs); recomputeStats(tgt, gs); pushLog(gs, `🏰 ${tgt.name} ถูกล้อมเมือง — ช้า + พลังโจมตีลด 1 เทิร์น`, "event"); break;
+    case "leg_beauty": discardRandom(tgt, 2); addStatus(tgt, "curse", 1, 1, gs); recomputeStats(tgt, gs); pushLog(gs, `🌸 ${tgt.name} ตกอุบายสาวงาม — ทิ้ง 2 ใบ + สาป`, "event"); break;
+    case "leg_heaven_swap": { const top = byHp(true); if (top && top.id !== cp.id) { const tmp = cp.hp; cp.hp = Math.min(cp.maxHp, top.hp); top.hp = Math.min(top.maxHp, tmp); pushLog(gs, `☯️ ${cp.name} สลับ HP กับ ${top.name}!`, "event"); } break; }
+    case "leg_six_strat": dmgKill(tgt, 2); if (tgt.hand.length) { const c = tgt.hand.splice(Math.floor(Math.random() * tgt.hand.length), 1)[0]; cp.hand.push(c); enforceHandLimit(cp); } discardRandom(cp, 2); pushLog(gs, `🌌 ${cp.name} หกอุบายปิดฟ้า — โจมตี ${tgt.name} + ยึดการ์ด`, "dmg"); break;
+
+    default: return { error: "การ์ดนี้ยังไม่รองรับ" };
+  }
+  checkWinServer(gs);
+  return {};
+}
 
 // ── สรุปผลการ์ดแบบสั้น (โชว์ในกล่องแจ้งเตือนก่อน execute) ──────────────────────
 // คืนข้อความ 1 บรรทัด อ่านง่าย — ใช้กับ pendingInterrupt / actionNotice
