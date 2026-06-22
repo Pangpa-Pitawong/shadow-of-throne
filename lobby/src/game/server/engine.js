@@ -23,6 +23,10 @@ import {
 } from "./constants.js";
 import { send, broadcastGameState } from "./net.js";
 
+// โอกาสที่การ์ดที่จั่ว "เริ่มเทิร์น" ของผู้เล่นที่ยังไม่ใช่ราชา/ผู้ทรยศ จะกลายเป็น
+// ตราทรยศ (จำกัดด้วย gs._betrayersLeft) — ทำให้ตราทรยศปนในกองจั่วแบบลุ้น
+const BETRAYER_DRAW_CHANCE = 0.06;
+
 // จั่วการ์ดแบบถ่วงน้ำหนักตามความหายาก (% การจั่วตรงตามที่กำหนดใน RARITY)
 export function drawRandomCard(pool = ALL_CARDS_POOL) {
   const card = drawWeighted(pool, Math.random);
@@ -554,16 +558,15 @@ export function createInitialGameState(room) {
     _questTargets: zoneToCell,
     _code: room.code,            // ใช้ใน killPlayer สำหรับ startTraitorOffer
   };
-  // ─── แจกตราทรยศ 2 ใบให้ผู้เล่นสุ่ม (ไม่ใช่ราชา) ─────────────────────────────
-  //   ผู้ที่ถือไว้จนสิ้นเฟส → กลายเป็นผู้ทรยศโดยไม่มีใครรู้
+  // ─── ตราทรยศ: ผสมเข้ากองจั่วปกติ (ไม่แจกตั้งต้น) ───────────────────────────
+  //   จำนวนคงที่ = คุมความน่าจะเป็น · ผู้เล่น (ไม่ใช่ราชา) อาจ "จั่วโดน" เมื่อใดก็ได้
+  //   โดยไม่มีใครรู้ล่วงหน้า — ดู beginTurn (BETRAYER_DRAW_CHANCE)
   const nonKings = players.filter(p => p.role !== "king");
-  shuffle([...nonKings]).slice(0, Math.min(2, nonKings.length)).forEach(p => {
-    p.hand.push({ ...BETRAYER_CARD, uid: makeUid() });
-  });
+  gs._betrayersLeft = Math.min(2, nonKings.length);
 
   setActiveGS(gs);
   pushLog(gs, "🏰 เกมเริ่มต้น! พระราชาเปิดตัวและเริ่มเล่นก่อน", "event");
-  pushLog(gs, "🗡️ ตราทรยศถูกแจกให้ผู้เล่นที่ซ่อนอยู่ในเงามืด... (เฉพาะผู้ถือเห็นในมือตัวเอง)", "event");
+  pushLog(gs, "🗡️ ตราทรยศถูกซ่อนปนอยู่ในกองจั่ว... ผู้ใดจะจั่วโดนไม่มีใครล่วงรู้", "event");
   if (kingBuffPct > 0) pushLog(gs, `👑 ผู้เล่น ${totalPlayers} คน — พระราชาได้รับพรราชวงศ์ ค่าสถานะ +${Math.round(kingBuffPct * 100)}%`, "event");
   pushLog(gs, `👑 ${players[turnOrder[0]]?.name} (พระราชา) เริ่มเทิร์นแรก`, "turn");
   beginTurn(gs, true);
@@ -991,7 +994,17 @@ export function beginTurn(gs, isFirst = false, guard = 0) {
   // กับดักไฟแผดการ์ด — เผาการ์ดที่จะจั่ว
   if (p._burnDraw > 0 && drawN > 0) { const burn = Math.min(p._burnDraw, drawN); drawN -= burn; p._burnDraw -= burn; if (burn > 0) pushLog(gs, `🔥 ${p.name} การ์ด ${burn} ใบถูกเผาก่อนจั่ว`, "dmg"); }
   const drew = [];
-  for (let i = 0; i < Math.max(0, drawN); i++) drew.push(drawRandomCard());
+  for (let i = 0; i < Math.max(0, drawN); i++) {
+    // ตราทรยศปนในกองจั่ว: ผู้เล่นที่ไม่ใช่ราชา/ผู้ทรยศ และยังไม่ถือตราทรยศ มีโอกาสจั่วโดน
+    const canBetray = (gs._betrayersLeft || 0) > 0 && p.role !== "king" && p.role !== "traitor"
+      && !p.hand.some(c => c.type === "betrayer") && !drew.some(c => c.type === "betrayer");
+    if (canBetray && Math.random() < BETRAYER_DRAW_CHANCE) {
+      gs._betrayersLeft--;
+      drew.push({ ...BETRAYER_CARD, uid: makeUid() });
+    } else {
+      drew.push(drawRandomCard());
+    }
+  }
   p.justDrew = drew.map(c => c.uid);   // client ใช้สำหรับแอนิเมชันเปิดไพ่
   for (const c of drew) p.hand.push(c);
   if (drew.length) pushLog(gs, `🎴 ${p.name} จั่วการ์ดเริ่มเทิร์น ${drew.length} ใบ`, "");

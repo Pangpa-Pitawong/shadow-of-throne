@@ -134,6 +134,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
   const [showDice, setShowDice] = useState(null);
   const [activeEvent, setActiveEvent] = useState(null);
   const [tooltip, setTooltip] = useState(null);
+  const [cardDetail, setCardDetail] = useState(null); // การ์ดที่กดดู "รายละเอียด" → modal
   const [showRules, setShowRules] = useState(false);
   const [ruleTab, setRuleTab] = useState(0); // หมวดกฎที่กำลังเปิดอ่าน
   const [showLegend, setShowLegend] = useState(false);
@@ -817,8 +818,7 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
                     setSelectedCard(card);
                     setActionMode(null);
                   }}
-                  onHover={e => setTooltip({ x: e.clientX - 210, y: e.clientY - 40, title: card.name, desc: card.desc || "" })}
-                  onLeave={() => setTooltip(null)}
+                  onDetail={setCardDetail}
                 />
               ))}
               {(!me?.hand || me.hand.length === 0) && (
@@ -1010,6 +1010,25 @@ export default function GameBoard({ gameState: serverGameState, myIdx, onLeave, 
         onRespond={(uid) => onGameAction("interrupt_respond", { cardUid: uid })}
       />
       <Tooltip tooltip={tooltip} />
+
+      {/* ═══ CARD DETAIL MODAL — คำอธิบายเต็มของการ์ด (เปิดจากปุ่ม "รายละเอียด") ═══ */}
+      {cardDetail && (
+        <div className="carddetail-backdrop" onClick={() => setCardDetail(null)}>
+          <div className="carddetail-modal" onClick={e => e.stopPropagation()}>
+            <div className="carddetail-head">
+              <span className="carddetail-ico">{cardDetail.ico}</span>
+              <div>
+                <div className="carddetail-nm">{cardDetail.name}</div>
+                <span className={`card-badge bdg-${cardDetail.type}`}>
+                  {{ weapon: "ยุทธภัณฑ์", magic: "กลศึก", trap: "อุบาย", betrayer: "ตราทรยศ" }[cardDetail.type] || "การ์ด"}
+                </span>
+              </div>
+            </div>
+            <div className="carddetail-desc">{cardDetail.desc}</div>
+            <button className="carddetail-close tb-btn" onClick={() => setCardDetail(null)}>ปิด</button>
+          </div>
+        </div>
+      )}
 
       {/* ═══ LEGEND MODAL ═══ */}
       {showLegend && (
